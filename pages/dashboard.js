@@ -317,7 +317,7 @@ export default function Dashboard() {
       if (from === "Final") break;
 
       const fromMatches = currentMatches.filter((m) => {
-        if (from === "group") return m.group != null;
+        if (from === "group") return !["R32","R16","QF","SF","Final"].includes(m.stage);
         return m.stage === from;
       });
 
@@ -393,9 +393,12 @@ export default function Dashboard() {
   };
 
   // Organise matches by stage
+  const KNOCKOUT_STAGES = new Set(["R32", "R16", "QF", "SF", "Final"]);
+  const isGroupMatch = (m) => !KNOCKOUT_STAGES.has(m.stage);
+
   const byStage = STAGE_ORDER.reduce((acc, s) => {
     acc[s] = matches.filter((m) => {
-      if (s === "group") return m.group != null;
+      if (s === "group") return isGroupMatch(m);
       return m.stage === s;
     });
     return acc;
