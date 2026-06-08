@@ -54,10 +54,192 @@ function Badge({ children, color = S.accent }) {
   );
 }
 
-function MatchCard({ match, score, locked, onChange, onSave, saved }) {
-  const hasPrediction = score?.home !== undefined && score?.home !== "" &&
-                        score?.away !== undefined && score?.away !== "";
+function computeGroupTable(groupMatches, scores) {
+  const table = {};
+  groupMatches.forEach((m) => {
+    [m.home_team, m.away_team].forEach((t) => {
+      if (t && !table[t]) table[t] = { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+    });
+    const s = scores[m.id];
+    if (!s || s.home === "" || s.home === undefined || s.away === "" || s.away === undefined) return;
+    const hg = Number(s.home), ag = Number(s.away);
+    if (!table[m.home_team] || !table[m.away_team]) return;
+    table[m.home_team].p++;  table[m.away_team].p++;
+    table[m.home_team].gf += hg; table[m.home_team].ga += ag;
+    table[m.away_team].gf += ag; table[m.away_team].ga += hg;
+    if (hg > ag)      { table[m.home_team].w++; table[m.away_team].l++; table[m.home_team].pts += 3; }
+    else if (ag > hg) { table[m.away_team].w++; table[m.home_team].l++; table[m.away_team].pts += 3; }
+    else              { table[m.home_team].d++; table[m.away_team].d++; table[m.home_team].pts++; table[m.away_team].pts++; }
+  });
+  return Object.entries(table)
+    .sort(([,a],[,b]) => b.pts - a.pts || (b.gf-b.ga) - (a.gf-a.ga) || b.gf - a.gf)
+    .map(([team, s]) => ({ team, ...s, gd: s.gf - s.ga }));
+}
 
+function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange, onSaveGroup }) {
+  const table = computeGroupTable(groupMatches, scores);
+  const allSaved = groupMatches.every((m) => savedIds.has(m.id));
+  const anyUnsaved = groupMatches.some((m) => !savedIds.has(m.id));
+
+  return (
+    <div style={{
+      background: S.card,
+      border: `1px solid ${allSaved ? S.successDark + "66" : S.border}`,
+      borderRadius: 14,
+      marginBottom: 20,
+      overflow: "hidden",
+    }}>
+      {/* Group header */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "12px 18px",
+        background: "#161f2e",
+        borderBottom: `1px solid ${S.border}`,
+      }}>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: 14, letterSpacing: "0.5px" }}>
+          {groupKey}
+        </span>
+        {!locked && (
+          <button
+            onClick={() => onSaveGroup(groupMatches.map(m => m.id))}
+            style={{
+              padding: "5px 14px",
+              background: allSaved ? S.successDark : anyUnsaved ? S.accentDark : S.successDark,
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {allSaved ? "✓ Saved" : "Save Group"}
+          </button>
+        )}
+      </div>
+
+      {/* Two-column body */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 0,
+      }}>
+        {/* Left: matches */}
+        <div style={{ padding: "14px 16px", borderRight: `1px solid ${S.border}` }}>
+          {groupMatches.map((match) => (
+            <div key={match.id} style={{ marginBottom: 10 }}>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto 1fr",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <span style={{
+                  color: S.text, fontWeight: 600, fontSize: 13, textAlign: "right",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {match.home_team}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <input
+                    type="number" min="0"
+                    value={scores[match.id]?.home ?? ""}
+                    onChange={(e) => onChange(match.id, "home", e.target.value)}
+                    disabled={locked}
+                    placeholder="–"
+                    style={{
+                      width: 40, height: 36, textAlign: "center",
+                      background: locked ? "#0d1829" : "#0a1020",
+                      border: `1.5px solid ${scores[match.id]?.home !== undefined && scores[match.id]?.home !== "" ? S.accent : S.border}`,
+                      borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
+                      outline: "none", opacity: locked ? 0.5 : 1,
+                    }}
+                  />
+                  <span style={{ color: S.muted, fontSize: 14, fontWeight: 700 }}>:</span>
+                  <input
+                    type="number" min="0"
+                    value={scores[match.id]?.away ?? ""}
+                    onChange={(e) => onChange(match.id, "away", e.target.value)}
+                    disabled={locked}
+                    placeholder="–"
+                    style={{
+                      width: 40, height: 36, textAlign: "center",
+                      background: locked ? "#0d1829" : "#0a1020",
+                      border: `1.5px solid ${scores[match.id]?.away !== undefined && scores[match.id]?.away !== "" ? S.accent : S.border}`,
+                      borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
+                      outline: "none", opacity: locked ? 0.5 : 1,
+                    }}
+                  />
+                </div>
+                <span style={{
+                  color: S.text, fontWeight: 600, fontSize: 13, textAlign: "left",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {match.away_team}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: standings table */}
+        <div style={{ padding: "14px 16px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: S.muted }}>
+                <th style={{ textAlign: "left", paddingBottom: 6, fontWeight: 600 }}>Team</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>P</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>W</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>D</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>L</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GF</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GA</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 30 }}>GD</th>
+                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 700, width: 30, color: S.accent }}>Pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {table.map((row, i) => (
+                <tr key={row.team} style={{
+                  borderTop: `1px solid ${S.border}`,
+                  background: i < 2 ? "#1a2d1a" : i === 2 ? "#1a1a2d" : "transparent",
+                }}>
+                  <td style={{
+                    padding: "5px 0",
+                    color: i < 2 ? S.success : i === 2 ? S.accent : S.textSoft,
+                    fontWeight: i < 2 ? 700 : 400,
+                    fontSize: 12,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    maxWidth: 80,
+                  }}>{row.team}</td>
+                  {["p","w","d","l","gf","ga","gd","pts"].map((k) => (
+                    <td key={k} style={{
+                      textAlign: "center", padding: "5px 0",
+                      color: k === "pts" ? (i < 2 ? S.success : S.text) : S.textSoft,
+                      fontWeight: k === "pts" ? 700 : 400,
+                    }}>{row[k]}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 10, color: S.muted }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a2d1a", display: "inline-block" }} /> Advances
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a1a2d", display: "inline-block" }} /> Possible 3rd
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MatchCard({ match, score, locked, onChange, onSave, saved }) {
   return (
     <div style={{
       background: S.card,
@@ -65,7 +247,6 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
       borderRadius: 12,
       padding: "18px 20px",
       marginBottom: 10,
-      transition: "border-color 0.2s",
     }}>
       <div style={{
         display: "grid",
@@ -78,60 +259,43 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
             {match.home_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
-
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input
-            type="number"
-            min="0"
+            type="number" min="0"
             value={score?.home ?? ""}
             onChange={(e) => onChange(match.id, "home", e.target.value)}
             disabled={locked || !match.home_team || match.home_team === "TBD"}
             placeholder="0"
             style={{
-              width: 52,
-              height: 44,
-              textAlign: "center",
+              width: 52, height: 44, textAlign: "center",
               background: locked ? "#0d1829" : "#0f172a",
               border: `1.5px solid ${score?.home !== undefined && score?.home !== "" ? S.accent : S.border}`,
-              borderRadius: 8,
-              color: S.text,
-              fontSize: 20,
-              fontWeight: 700,
-              outline: "none",
+              borderRadius: 8, color: S.text, fontSize: 20, fontWeight: 700, outline: "none",
               opacity: (locked || !match.home_team || match.home_team === "TBD") ? 0.4 : 1,
             }}
           />
           <span style={{ color: S.muted, fontWeight: 700, fontSize: 18 }}>–</span>
           <input
-            type="number"
-            min="0"
+            type="number" min="0"
             value={score?.away ?? ""}
             onChange={(e) => onChange(match.id, "away", e.target.value)}
             disabled={locked || !match.away_team || match.away_team === "TBD"}
             placeholder="0"
             style={{
-              width: 52,
-              height: 44,
-              textAlign: "center",
+              width: 52, height: 44, textAlign: "center",
               background: locked ? "#0d1829" : "#0f172a",
               border: `1.5px solid ${score?.away !== undefined && score?.away !== "" ? S.accent : S.border}`,
-              borderRadius: 8,
-              color: S.text,
-              fontSize: 20,
-              fontWeight: 700,
-              outline: "none",
+              borderRadius: 8, color: S.text, fontSize: 20, fontWeight: 700, outline: "none",
               opacity: (locked || !match.away_team || match.away_team === "TBD") ? 0.4 : 1,
             }}
           />
         </div>
-
         <div style={{ textAlign: "left" }}>
           <span style={{ color: S.text, fontWeight: 700, fontSize: 16 }}>
             {match.away_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
       </div>
-
       {!locked && match.home_team && match.home_team !== "TBD" && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
           <button
@@ -139,12 +303,8 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
             style={{
               padding: "7px 20px",
               background: saved ? S.successDark : S.accentDark,
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
+              color: "white", border: "none", borderRadius: 6,
+              fontSize: 13, fontWeight: 600, cursor: "pointer",
             }}
           >
             {saved ? "✓ Saved" : "Save"}
@@ -155,31 +315,75 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
   );
 }
 
-function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSave, isComplete, isNext, advancingStage }) {
+
+function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSave, onSaveGroup, isComplete, isNext, advancingStage }) {
   const label = STAGE_LABELS[stage] || stage;
   const savedCount = matches.filter((m) => savedIds.has(m.id)).length;
   const total = matches.length;
   const hasTBD = matches.some((m) => !m.home_team || m.home_team === "TBD");
 
-  // Group stage: group by letter; knockout: flat list
-  const grouped = stage === "group"
-    ? matches.reduce((acc, m) => {
-        const g = m.stage || "Other"; // e.g. "Group A"
-        if (!acc[g]) acc[g] = [];
-        acc[g].push(m);
-        return acc;
-      }, {})
-    : { all: matches };
+  if (stage === "group") {
+    const grouped = matches.reduce((acc, m) => {
+      const g = m.stage || "Other";
+      if (!acc[g]) acc[g] = [];
+      acc[g].push(m);
+      return acc;
+    }, {});
 
+    return (
+      <div style={{ marginBottom: 40 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div>
+            <h2 style={{ color: S.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
+              {label}
+            </h2>
+            <p style={{ color: S.muted, fontSize: 13, margin: "4px 0 0" }}>
+              {isComplete ? `All ${total} predictions saved` : `${savedCount} of ${total} saved`}
+            </p>
+          </div>
+          <div style={{ marginLeft: "auto" }}>
+            {isComplete && <Badge color={S.success}>✓ Complete</Badge>}
+          </div>
+        </div>
+
+        {!locked && total > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12, color: S.muted }}>
+              <span>Prediction progress</span>
+              <span>{Math.round((savedCount / total) * 100)}%</span>
+            </div>
+            <div style={{ height: 4, background: S.border, borderRadius: 99, overflow: "hidden" }}>
+              <div style={{
+                height: "100%",
+                width: `${(savedCount / total) * 100}%`,
+                background: "linear-gradient(90deg, #2563eb, #22c55e)",
+                borderRadius: 99,
+                transition: "width 0.4s ease",
+              }} />
+            </div>
+          </div>
+        )}
+
+        {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([groupKey, groupMatches]) => (
+          <GroupPanel
+            key={groupKey}
+            groupKey={groupKey}
+            groupMatches={groupMatches}
+            scores={scores}
+            savedIds={savedIds}
+            locked={locked}
+            onChange={onChange}
+            onSaveGroup={onSaveGroup}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Knockout stage
   return (
     <div style={{ marginBottom: 40 }}>
-      {/* Stage header */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        marginBottom: 20,
-      }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
         <div>
           <h2 style={{ color: S.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
             {label}
@@ -198,67 +402,16 @@ function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSa
           {advancingStage === stage && <Badge color={S.accent}>Generating...</Badge>}
         </div>
       </div>
-
-      {/* Progress bar (group stage only) */}
-      {stage === "group" && !locked && total > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginBottom: 6,
-            fontSize: 12,
-            color: S.muted,
-          }}>
-            <span>Prediction progress</span>
-            <span>{Math.round((savedCount / total) * 100)}%</span>
-          </div>
-          <div style={{ height: 4, background: S.border, borderRadius: 99, overflow: "hidden" }}>
-            <div style={{
-              height: "100%",
-              width: `${(savedCount / total) * 100}%`,
-              background: "linear-gradient(90deg, #2563eb, #22c55e)",
-              borderRadius: 99,
-              transition: "width 0.4s ease",
-            }} />
-          </div>
-        </div>
-      )}
-
-      {/* Matches */}
-      {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([groupKey, groupMatches]) => (
-        <div key={groupKey}>
-          {stage === "group" && (
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 10,
-            }}>
-              <span style={{
-                color: S.textSoft,
-                fontSize: 12,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "1px",
-              }}>
-                {groupKey}
-              </span>
-              <div style={{ flex: 1, height: 1, background: S.border }} />
-              <span style={{ color: S.muted, fontSize: 12 }}>{groupMatches.length} matches</span>
-            </div>
-          )}
-          {groupMatches.map((match) => (
-            <MatchCard
-              key={match.id}
-              match={match}
-              score={scores[match.id]}
-              locked={locked}
-              onChange={onChange}
-              onSave={onSave}
-              saved={savedIds.has(match.id)}
-            />
-          ))}
-        </div>
+      {matches.map((match) => (
+        <MatchCard
+          key={match.id}
+          match={match}
+          score={scores[match.id]}
+          locked={locked}
+          onChange={onChange}
+          onSave={onSave}
+          saved={savedIds.has(match.id)}
+        />
       ))}
     </div>
   );
@@ -357,6 +510,20 @@ export default function Dashboard() {
       if (allSaved) { setActiveTab(to); break; }
       break;
     }
+  };
+
+  const saveGroup = async (matchIds) => {
+    if (locked) return;
+    await Promise.all(matchIds.map((matchId) => {
+      const s = scores[matchId];
+      return supabase.from("predictions").upsert({
+        user_id: user.id,
+        match_id: matchId,
+        predicted_home_score: parseInt(s?.home ?? 0),
+        predicted_away_score: parseInt(s?.away ?? 0),
+      });
+    }));
+    setSavedIds((prev) => new Set([...prev, ...matchIds]));
   };
 
   const lockPredictions = async () => {
@@ -623,6 +790,7 @@ export default function Dashboard() {
               locked={locked}
               onChange={handleChange}
               onSave={savePrediction}
+              onSaveGroup={saveGroup}
               isComplete={isStageComplete(activeTab)}
               isNext={activeTab === currentActiveStage}
               advancingStage={advancingStage}
