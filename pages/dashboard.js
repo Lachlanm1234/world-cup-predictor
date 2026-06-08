@@ -33,21 +33,24 @@ const STAGE_SEQUENCE = [
   { from: "SF",    to: "Final" },
 ];
 
-const isGroupMatch = (m) => m.stage?.startsWith("Group ");
-const isStageMatch = (m, key) => m.stage === DB_STAGE[key];
+function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return mobile;
+}
 
 function Badge({ children, color = S.accent }) {
   return (
     <span style={{
-      background: color + "22",
-      color,
-      border: `1px solid ${color}44`,
-      borderRadius: 6,
-      padding: "2px 8px",
-      fontSize: 11,
-      fontWeight: 700,
-      letterSpacing: "0.5px",
-      textTransform: "uppercase",
+      background: color + "22", color,
+      border: `1px solid ${color}44`, borderRadius: 6,
+      padding: "2px 8px", fontSize: 11, fontWeight: 700,
+      letterSpacing: "0.5px", textTransform: "uppercase",
     }}>
       {children}
     </span>
@@ -64,7 +67,7 @@ function computeGroupTable(groupMatches, scores) {
     if (!s || s.home === "" || s.home === undefined || s.away === "" || s.away === undefined) return;
     const hg = Number(s.home), ag = Number(s.away);
     if (!table[m.home_team] || !table[m.away_team]) return;
-    table[m.home_team].p++;  table[m.away_team].p++;
+    table[m.home_team].p++; table[m.away_team].p++;
     table[m.home_team].gf += hg; table[m.home_team].ga += ag;
     table[m.away_team].gf += ag; table[m.away_team].ga += hg;
     if (hg > ag)      { table[m.home_team].w++; table[m.away_team].l++; table[m.home_team].pts += 3; }
@@ -76,43 +79,73 @@ function computeGroupTable(groupMatches, scores) {
     .map(([team, s]) => ({ team, ...s, gd: s.gf - s.ga }));
 }
 
-function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange, onSaveGroup }) {
+function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange, onSaveGroup, isMobile }) {
   const table = computeGroupTable(groupMatches, scores);
   const allSaved = groupMatches.every((m) => savedIds.has(m.id));
   const anyUnsaved = groupMatches.some((m) => !savedIds.has(m.id));
+
+  const standings = (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <thead>
+        <tr style={{ color: S.muted }}>
+          <th style={{ textAlign: "left", paddingBottom: 6, fontWeight: 600 }}>Team</th>
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>P</th>
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>W</th>
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>D</th>
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>L</th>
+          {!isMobile && <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GF</th>}
+          {!isMobile && <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GA</th>}
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 30 }}>GD</th>
+          <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 700, width: 30, color: S.accent }}>Pts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {table.map((row, i) => (
+          <tr key={row.team} style={{
+            borderTop: `1px solid ${S.border}`,
+            background: i < 2 ? "#1a2d1a" : i === 2 ? "#1a1a2d" : "transparent",
+          }}>
+            <td style={{
+              padding: "5px 0",
+              color: i < 2 ? S.success : i === 2 ? S.accent : S.textSoft,
+              fontWeight: i < 2 ? 700 : 400, fontSize: 12,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              maxWidth: isMobile ? 90 : 80,
+            }}>{row.team}</td>
+            <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.p}</td>
+            <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.w}</td>
+            <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.d}</td>
+            <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.l}</td>
+            {!isMobile && <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.gf}</td>}
+            {!isMobile && <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.ga}</td>}
+            <td style={{ textAlign: "center", padding: "5px 0", color: S.textSoft }}>{row.gd}</td>
+            <td style={{ textAlign: "center", padding: "5px 0", color: i < 2 ? S.success : S.text, fontWeight: 700 }}>{row.pts}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 
   return (
     <div style={{
       background: S.card,
       border: `1px solid ${allSaved ? S.successDark + "66" : S.border}`,
-      borderRadius: 14,
-      marginBottom: 20,
-      overflow: "hidden",
+      borderRadius: 14, marginBottom: 16, overflow: "hidden",
     }}>
       {/* Group header */}
       <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "12px 18px",
-        background: "#161f2e",
-        borderBottom: `1px solid ${S.border}`,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", background: "#161f2e", borderBottom: `1px solid ${S.border}`,
       }}>
-        <span style={{ color: S.text, fontWeight: 700, fontSize: 14, letterSpacing: "0.5px" }}>
-          {groupKey}
-        </span>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: 14 }}>{groupKey}</span>
         {!locked && (
           <button
             onClick={() => onSaveGroup(groupMatches.map(m => m.id))}
             style={{
               padding: "5px 14px",
-              background: allSaved ? S.successDark : anyUnsaved ? S.accentDark : S.successDark,
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
+              background: allSaved ? S.successDark : S.accentDark,
+              color: "white", border: "none", borderRadius: 6,
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
             }}
           >
             {allSaved ? "✓ Saved" : "Save Group"}
@@ -120,188 +153,177 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
         )}
       </div>
 
-      {/* Two-column body */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: 0,
-      }}>
-        {/* Left: matches */}
-        <div style={{ padding: "14px 16px", borderRight: `1px solid ${S.border}` }}>
-          {groupMatches.map((match) => (
-            <div key={match.id} style={{ marginBottom: 10 }}>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "1fr auto 1fr",
-                alignItems: "center",
-                gap: 8,
-              }}>
-                <span style={{
-                  color: S.text, fontWeight: 600, fontSize: 13, textAlign: "right",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {match.home_team}
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <input
-                    type="number" min="0"
-                    value={scores[match.id]?.home ?? ""}
-                    onChange={(e) => onChange(match.id, "home", e.target.value)}
-                    disabled={locked}
-                    placeholder="–"
-                    style={{
-                      width: 40, height: 36, textAlign: "center",
-                      background: locked ? "#0d1829" : "#0a1020",
-                      border: `1.5px solid ${scores[match.id]?.home !== undefined && scores[match.id]?.home !== "" ? S.accent : S.border}`,
-                      borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
-                      outline: "none", opacity: locked ? 0.5 : 1,
-                    }}
-                  />
-                  <span style={{ color: S.muted, fontSize: 14, fontWeight: 700 }}>:</span>
-                  <input
-                    type="number" min="0"
-                    value={scores[match.id]?.away ?? ""}
-                    onChange={(e) => onChange(match.id, "away", e.target.value)}
-                    disabled={locked}
-                    placeholder="–"
-                    style={{
-                      width: 40, height: 36, textAlign: "center",
-                      background: locked ? "#0d1829" : "#0a1020",
-                      border: `1.5px solid ${scores[match.id]?.away !== undefined && scores[match.id]?.away !== "" ? S.accent : S.border}`,
-                      borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
-                      outline: "none", opacity: locked ? 0.5 : 1,
-                    }}
-                  />
+      {isMobile ? (
+        /* Mobile: matches stacked, then standings below */
+        <div>
+          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${S.border}` }}>
+            {groupMatches.map((match) => (
+              <div key={match.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: S.text, fontWeight: 600, fontSize: 13, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {match.home_team}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="number" min="0" inputMode="numeric"
+                      value={scores[match.id]?.home ?? ""}
+                      onChange={(e) => onChange(match.id, "home", e.target.value)}
+                      disabled={locked} placeholder="–"
+                      style={{
+                        width: 44, height: 40, textAlign: "center",
+                        background: locked ? "#0d1829" : "#0a1020",
+                        border: `1.5px solid ${scores[match.id]?.home !== undefined && scores[match.id]?.home !== "" ? S.accent : S.border}`,
+                        borderRadius: 6, color: S.text, fontSize: 17, fontWeight: 700,
+                        outline: "none", opacity: locked ? 0.5 : 1,
+                      }}
+                    />
+                    <span style={{ color: S.muted, fontSize: 14, fontWeight: 700 }}>:</span>
+                    <input
+                      type="number" min="0" inputMode="numeric"
+                      value={scores[match.id]?.away ?? ""}
+                      onChange={(e) => onChange(match.id, "away", e.target.value)}
+                      disabled={locked} placeholder="–"
+                      style={{
+                        width: 44, height: 40, textAlign: "center",
+                        background: locked ? "#0d1829" : "#0a1020",
+                        border: `1.5px solid ${scores[match.id]?.away !== undefined && scores[match.id]?.away !== "" ? S.accent : S.border}`,
+                        borderRadius: 6, color: S.text, fontSize: 17, fontWeight: 700,
+                        outline: "none", opacity: locked ? 0.5 : 1,
+                      }}
+                    />
+                  </div>
+                  <span style={{ color: S.text, fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {match.away_team}
+                  </span>
                 </div>
-                <span style={{
-                  color: S.text, fontWeight: 600, fontSize: 13, textAlign: "left",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {match.away_team}
-                </span>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Right: standings table */}
-        <div style={{ padding: "14px 16px" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ color: S.muted }}>
-                <th style={{ textAlign: "left", paddingBottom: 6, fontWeight: 600 }}>Team</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>P</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>W</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>D</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 22 }}>L</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GF</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 28 }}>GA</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600, width: 30 }}>GD</th>
-                <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 700, width: 30, color: S.accent }}>Pts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {table.map((row, i) => (
-                <tr key={row.team} style={{
-                  borderTop: `1px solid ${S.border}`,
-                  background: i < 2 ? "#1a2d1a" : i === 2 ? "#1a1a2d" : "transparent",
-                }}>
-                  <td style={{
-                    padding: "5px 0",
-                    color: i < 2 ? S.success : i === 2 ? S.accent : S.textSoft,
-                    fontWeight: i < 2 ? 700 : 400,
-                    fontSize: 12,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    maxWidth: 80,
-                  }}>{row.team}</td>
-                  {["p","w","d","l","gf","ga","gd","pts"].map((k) => (
-                    <td key={k} style={{
-                      textAlign: "center", padding: "5px 0",
-                      color: k === "pts" ? (i < 2 ? S.success : S.text) : S.textSoft,
-                      fontWeight: k === "pts" ? 700 : 400,
-                    }}>{row[k]}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 10, color: S.muted }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a2d1a", display: "inline-block" }} /> Advances
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a1a2d", display: "inline-block" }} /> Possible 3rd
-            </span>
+            ))}
+          </div>
+          <div style={{ padding: "12px 14px" }}>
+            {standings}
           </div>
         </div>
-      </div>
+      ) : (
+        /* Desktop: two columns side by side */
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+          <div style={{ padding: "14px 16px", borderRight: `1px solid ${S.border}` }}>
+            {groupMatches.map((match) => (
+              <div key={match.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: S.text, fontWeight: 600, fontSize: 13, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {match.home_team}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <input
+                      type="number" min="0"
+                      value={scores[match.id]?.home ?? ""}
+                      onChange={(e) => onChange(match.id, "home", e.target.value)}
+                      disabled={locked} placeholder="–"
+                      style={{
+                        width: 40, height: 36, textAlign: "center",
+                        background: locked ? "#0d1829" : "#0a1020",
+                        border: `1.5px solid ${scores[match.id]?.home !== undefined && scores[match.id]?.home !== "" ? S.accent : S.border}`,
+                        borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
+                        outline: "none", opacity: locked ? 0.5 : 1,
+                      }}
+                    />
+                    <span style={{ color: S.muted, fontSize: 14, fontWeight: 700 }}>:</span>
+                    <input
+                      type="number" min="0"
+                      value={scores[match.id]?.away ?? ""}
+                      onChange={(e) => onChange(match.id, "away", e.target.value)}
+                      disabled={locked} placeholder="–"
+                      style={{
+                        width: 40, height: 36, textAlign: "center",
+                        background: locked ? "#0d1829" : "#0a1020",
+                        border: `1.5px solid ${scores[match.id]?.away !== undefined && scores[match.id]?.away !== "" ? S.accent : S.border}`,
+                        borderRadius: 6, color: S.text, fontSize: 16, fontWeight: 700,
+                        outline: "none", opacity: locked ? 0.5 : 1,
+                      }}
+                    />
+                  </div>
+                  <span style={{ color: S.text, fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {match.away_team}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "14px 16px" }}>
+            {standings}
+            <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 10, color: S.muted }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a2d1a", display: "inline-block" }} /> Advances
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "#1a1a2d", display: "inline-block" }} /> Possible 3rd
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function MatchCard({ match, score, locked, onChange, onSave, saved }) {
+function MatchCard({ match, score, locked, onChange, onSave, saved, isMobile }) {
+  const isTBD = !match.home_team || match.home_team === "TBD";
   return (
     <div style={{
       background: S.card,
       border: `1px solid ${saved ? S.successDark + "88" : S.border}`,
-      borderRadius: 12,
-      padding: "18px 20px",
-      marginBottom: 10,
+      borderRadius: 12, padding: isMobile ? "14px" : "18px 20px", marginBottom: 10,
     }}>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr auto 1fr",
-        alignItems: "center",
-        gap: 16,
-      }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: isMobile ? 8 : 16 }}>
         <div style={{ textAlign: "right" }}>
-          <span style={{ color: S.text, fontWeight: 700, fontSize: 16 }}>
+          <span style={{ color: S.text, fontWeight: 700, fontSize: isMobile ? 13 : 16, wordBreak: "break-word" }}>
             {match.home_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 5 : 8 }}>
           <input
-            type="number" min="0"
+            type="number" min="0" inputMode="numeric"
             value={score?.home ?? ""}
             onChange={(e) => onChange(match.id, "home", e.target.value)}
-            disabled={locked || !match.home_team || match.home_team === "TBD"}
+            disabled={locked || isTBD}
             placeholder="0"
             style={{
-              width: 52, height: 44, textAlign: "center",
+              width: isMobile ? 46 : 52, height: isMobile ? 42 : 44, textAlign: "center",
               background: locked ? "#0d1829" : "#0f172a",
               border: `1.5px solid ${score?.home !== undefined && score?.home !== "" ? S.accent : S.border}`,
-              borderRadius: 8, color: S.text, fontSize: 20, fontWeight: 700, outline: "none",
-              opacity: (locked || !match.home_team || match.home_team === "TBD") ? 0.4 : 1,
+              borderRadius: 8, color: S.text, fontSize: isMobile ? 18 : 20, fontWeight: 700,
+              outline: "none", opacity: (locked || isTBD) ? 0.4 : 1,
             }}
           />
-          <span style={{ color: S.muted, fontWeight: 700, fontSize: 18 }}>–</span>
+          <span style={{ color: S.muted, fontWeight: 700, fontSize: isMobile ? 15 : 18 }}>–</span>
           <input
-            type="number" min="0"
+            type="number" min="0" inputMode="numeric"
             value={score?.away ?? ""}
             onChange={(e) => onChange(match.id, "away", e.target.value)}
-            disabled={locked || !match.away_team || match.away_team === "TBD"}
+            disabled={locked || isTBD}
             placeholder="0"
             style={{
-              width: 52, height: 44, textAlign: "center",
+              width: isMobile ? 46 : 52, height: isMobile ? 42 : 44, textAlign: "center",
               background: locked ? "#0d1829" : "#0f172a",
               border: `1.5px solid ${score?.away !== undefined && score?.away !== "" ? S.accent : S.border}`,
-              borderRadius: 8, color: S.text, fontSize: 20, fontWeight: 700, outline: "none",
-              opacity: (locked || !match.away_team || match.away_team === "TBD") ? 0.4 : 1,
+              borderRadius: 8, color: S.text, fontSize: isMobile ? 18 : 20, fontWeight: 700,
+              outline: "none", opacity: (locked || isTBD) ? 0.4 : 1,
             }}
           />
         </div>
         <div style={{ textAlign: "left" }}>
-          <span style={{ color: S.text, fontWeight: 700, fontSize: 16 }}>
+          <span style={{ color: S.text, fontWeight: 700, fontSize: isMobile ? 13 : 16, wordBreak: "break-word" }}>
             {match.away_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
       </div>
-      {!locked && match.home_team && match.home_team !== "TBD" && (
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+      {!locked && !isTBD && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
           <button
             onClick={() => onSave(match.id)}
             style={{
-              padding: "7px 20px",
+              padding: isMobile ? "9px 0" : "7px 20px",
+              width: isMobile ? "100%" : "auto",
               background: saved ? S.successDark : S.accentDark,
               color: "white", border: "none", borderRadius: 6,
               fontSize: 13, fontWeight: 600, cursor: "pointer",
@@ -315,8 +337,7 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
   );
 }
 
-
-function Best3rdTable({ groupMatches, predMap }) {
+function Best3rdTable({ groupMatches, predMap, isMobile }) {
   const allThirds = useMemo(() => {
     const groups = {};
     groupMatches.forEach((match) => {
@@ -350,76 +371,62 @@ function Best3rdTable({ groupMatches, predMap }) {
 
   if (allThirds.length === 0) return null;
 
+  // On mobile show fewer columns
+  const cols = isMobile
+    ? ["p", "w", "d", "l", "gd", "pts"]
+    : ["p", "w", "d", "l", "gf", "ga", "gd", "pts"];
+
   return (
     <div style={{
-      background: S.card,
-      border: `1px solid ${S.border}`,
-      borderRadius: 14,
-      overflow: "hidden",
-      marginTop: 32,
-      marginBottom: 8,
+      background: S.card, border: `1px solid ${S.border}`,
+      borderRadius: 14, overflow: "hidden", marginTop: 24, marginBottom: 8,
     }}>
       <div style={{
-        padding: "12px 18px",
-        background: "#161f2e",
+        padding: "10px 14px", background: "#161f2e",
         borderBottom: `1px solid ${S.border}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        <span style={{ color: S.text, fontWeight: 700, fontSize: 14 }}>Best 3rd Place Finishes</span>
-        <span style={{ color: S.muted, fontSize: 12 }}>Top 8 advance to Round of 32</span>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: 13 }}>Best 3rd Place Finishes</span>
+        <span style={{ color: S.muted, fontSize: 11 }}>Top 8 advance</span>
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr style={{ color: S.muted, background: S.surface }}>
-            <th style={{ textAlign: "left", padding: "8px 18px", fontWeight: 600, width: 30 }}>#</th>
-            <th style={{ textAlign: "left", padding: "8px 4px", fontWeight: 600 }}>Team</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>Grp</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>P</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>W</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>D</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>L</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>GF</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>GA</th>
-            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 36 }}>GD</th>
-            <th style={{ textAlign: "center", padding: "8px 18px 8px 4px", fontWeight: 700, width: 40, color: S.accent }}>Pts</th>
-          </tr>
-        </thead>
-        <tbody>
-          {allThirds.map((row, i) => {
-            const qualifies = i < 8;
-            const borderColor = qualifies ? S.success + "44" : S.border;
-            return (
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: S.muted, background: S.surface }}>
+              <th style={{ textAlign: "left", padding: "7px 14px", fontWeight: 600, width: 28 }}>#</th>
+              <th style={{ textAlign: "left", padding: "7px 4px", fontWeight: 600 }}>Team</th>
+              <th style={{ textAlign: "center", padding: "7px 4px", fontWeight: 600, width: 30 }}>Grp</th>
+              {cols.map((k) => (
+                <th key={k} style={{ textAlign: "center", padding: "7px 4px", fontWeight: k === "pts" ? 700 : 600, width: 28, color: k === "pts" ? S.accent : undefined }}>
+                  {k.toUpperCase()}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allThirds.map((row, i) => (
               <tr key={row.group} style={{
                 borderTop: `1px solid ${S.border}`,
-                background: qualifies ? "#1a2d1a" : i === 8 ? "#1f1a10" : "transparent",
+                background: i < 8 ? "#1a2d1a" : i === 8 ? "#1f1a10" : "transparent",
               }}>
-                <td style={{ padding: "7px 18px", color: qualifies ? S.success : S.muted, fontWeight: 700 }}>{i + 1}</td>
-                <td style={{ padding: "7px 4px", color: qualifies ? S.text : S.textSoft, fontWeight: qualifies ? 600 : 400 }}>{row.team}</td>
-                <td style={{ padding: "7px 4px", textAlign: "center", color: S.muted }}>{row.group}</td>
-                {["p","w","d","l","gf","ga","gd"].map((k) => (
-                  <td key={k} style={{ padding: "7px 4px", textAlign: "center", color: S.textSoft }}>{row[k]}</td>
+                <td style={{ padding: "6px 14px", color: i < 8 ? S.success : S.muted, fontWeight: 700 }}>{i + 1}</td>
+                <td style={{ padding: "6px 4px", color: i < 8 ? S.text : S.textSoft, fontWeight: i < 8 ? 600 : 400, whiteSpace: "nowrap" }}>{row.team}</td>
+                <td style={{ padding: "6px 4px", textAlign: "center", color: S.muted }}>{row.group}</td>
+                {cols.map((k) => (
+                  <td key={k} style={{ padding: "6px 4px", textAlign: "center", color: k === "pts" ? (i < 8 ? S.success : S.text) : S.textSoft, fontWeight: k === "pts" ? 700 : 400 }}>
+                    {row[k]}
+                  </td>
                 ))}
-                <td style={{ padding: "7px 18px 7px 4px", textAlign: "center", color: qualifies ? S.success : S.text, fontWeight: 700 }}>{row.pts}</td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 16, fontSize: 11, color: S.muted }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#1a2d1a", display: "inline-block" }} /> Advances to R32
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#1f1a10", display: "inline-block" }} /> 9th (eliminated)
-        </span>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
-function StageSection({ stage, matches, scores, predMap, savedIds, locked, onChange, onSave, onSaveGroup, isComplete, isNext, advancingStage }) {
+function StageSection({ stage, matches, scores, predMap, savedIds, locked, onChange, onSave, onSaveGroup, isComplete, advancingStage, isMobile }) {
   const label = STAGE_LABELS[stage] || stage;
   const savedCount = matches.filter((m) => savedIds.has(m.id)).length;
   const total = matches.length;
@@ -435,12 +442,10 @@ function StageSection({ stage, matches, scores, predMap, savedIds, locked, onCha
 
     return (
       <div style={{ marginBottom: 40 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
           <div>
-            <h2 style={{ color: S.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
-              {label}
-            </h2>
-            <p style={{ color: S.muted, fontSize: 13, margin: "4px 0 0" }}>
+            <h2 style={{ color: S.text, fontSize: isMobile ? 17 : 20, fontWeight: 800, margin: 0 }}>{label}</h2>
+            <p style={{ color: S.muted, fontSize: 12, margin: "3px 0 0" }}>
               {isComplete ? `All ${total} predictions saved` : `${savedCount} of ${total} saved`}
             </p>
           </div>
@@ -450,18 +455,16 @@ function StageSection({ stage, matches, scores, predMap, savedIds, locked, onCha
         </div>
 
         {!locked && total > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12, color: S.muted }}>
-              <span>Prediction progress</span>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 12, color: S.muted }}>
+              <span>Progress</span>
               <span>{Math.round((savedCount / total) * 100)}%</span>
             </div>
             <div style={{ height: 4, background: S.border, borderRadius: 99, overflow: "hidden" }}>
               <div style={{
-                height: "100%",
-                width: `${(savedCount / total) * 100}%`,
+                height: "100%", width: `${(savedCount / total) * 100}%`,
                 background: "linear-gradient(90deg, #2563eb, #22c55e)",
-                borderRadius: 99,
-                transition: "width 0.4s ease",
+                borderRadius: 99, transition: "width 0.4s ease",
               }} />
             </div>
           </div>
@@ -477,29 +480,24 @@ function StageSection({ stage, matches, scores, predMap, savedIds, locked, onCha
             locked={locked}
             onChange={onChange}
             onSaveGroup={onSaveGroup}
+            isMobile={isMobile}
           />
         ))}
 
-        <Best3rdTable groupMatches={matches} predMap={predMap} />
+        <Best3rdTable groupMatches={matches} predMap={predMap} isMobile={isMobile} />
       </div>
     );
   }
 
-  // Knockout stage
   return (
     <div style={{ marginBottom: 40 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div>
-          <h2 style={{ color: S.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
-            {label}
-          </h2>
-          <p style={{ color: S.muted, fontSize: 13, margin: "4px 0 0" }}>
-            {hasTBD
-              ? "Teams will be filled in once the previous round is complete"
-              : isComplete
-              ? `All ${total} predictions saved`
-              : `${savedCount} of ${total} saved`
-            }
+          <h2 style={{ color: S.text, fontSize: isMobile ? 17 : 20, fontWeight: 800, margin: 0 }}>{label}</h2>
+          <p style={{ color: S.muted, fontSize: 12, margin: "3px 0 0" }}>
+            {hasTBD ? "Teams fill in once previous round is complete"
+              : isComplete ? `All ${total} predictions saved`
+              : `${savedCount} of ${total} saved`}
           </p>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
@@ -516,6 +514,7 @@ function StageSection({ stage, matches, scores, predMap, savedIds, locked, onCha
           onChange={onChange}
           onSave={onSave}
           saved={savedIds.has(match.id)}
+          isMobile={isMobile}
         />
       ))}
     </div>
@@ -531,6 +530,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("group");
   const [advancingStage, setAdvancingStage] = useState(null);
+  const isMobile = useIsMobile();
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -538,27 +538,16 @@ export default function Dashboard() {
     setUser(user);
 
     const { data: userRow } = await supabase
-      .from("users")
-      .select("predictions_locked")
-      .eq("id", user.id)
-      .single();
-
+      .from("users").select("predictions_locked").eq("id", user.id).single();
     setLocked(userRow?.predictions_locked ?? false);
 
-    const { data: matchData, error: matchErr } = await supabase.from("matches").select("*");
-    console.log("matches fetched:", matchData?.length, "stages:", [...new Set(matchData?.map(m => m.stage))]);
-    const { data: predData } = await supabase
-      .from("predictions")
-      .select("*")
-      .eq("user_id", user.id);
+    const { data: matchData } = await supabase.from("matches").select("*");
+    const { data: predData } = await supabase.from("predictions").select("*").eq("user_id", user.id);
 
     const storedScores = {};
     const saved = new Set();
     predData?.forEach((p) => {
-      storedScores[p.match_id] = {
-        home: p.predicted_home_score,
-        away: p.predicted_away_score,
-      };
+      storedScores[p.match_id] = { home: p.predicted_home_score, away: p.predicted_away_score };
       saved.add(p.match_id);
     });
 
@@ -570,43 +559,31 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Build predMap from scores (includes both saved and unsaved changes)
   const predMap = useMemo(() => {
     const map = {};
     Object.entries(scores).forEach(([matchId, s]) => {
-      map[matchId] = {
-        match_id: matchId,
-        predicted_home_score: s.home ?? 0,
-        predicted_away_score: s.away ?? 0,
-      };
+      map[matchId] = { match_id: matchId, predicted_home_score: s.home ?? 0, predicted_away_score: s.away ?? 0 };
     });
     return map;
   }, [scores]);
 
-  // Compute the full bracket client-side — no DB writes
   const bracket = useMemo(() => computeFullBracket(matches, predMap), [matches, predMap]);
 
   const handleChange = (matchId, field, value) => {
     if (locked) return;
     setSavedIds((prev) => { const n = new Set(prev); n.delete(matchId); return n; });
-    setScores((prev) => ({
-      ...prev,
-      [matchId]: { ...prev[matchId], [field]: value },
-    }));
+    setScores((prev) => ({ ...prev, [matchId]: { ...prev[matchId], [field]: value } }));
   };
 
   const savePrediction = async (matchId) => {
     if (locked) return;
     const matchScore = scores[matchId];
     await supabase.from("predictions").upsert({
-      user_id: user.id,
-      match_id: matchId,
+      user_id: user.id, match_id: matchId,
       predicted_home_score: parseInt(matchScore?.home ?? 0),
       predicted_away_score: parseInt(matchScore?.away ?? 0),
     });
     setSavedIds((prev) => new Set([...prev, matchId]));
-
-    // Auto-advance tab when a stage becomes complete
     for (const { from, to } of STAGE_SEQUENCE) {
       const fromMatches = bracket[from === "group" ? "group" : from] || [];
       if (!fromMatches.length) continue;
@@ -622,8 +599,7 @@ export default function Dashboard() {
     await Promise.all(matchIds.map((matchId) => {
       const s = scores[matchId];
       return supabase.from("predictions").upsert({
-        user_id: user.id,
-        match_id: matchId,
+        user_id: user.id, match_id: matchId,
         predicted_home_score: parseInt(s?.home ?? 0),
         predicted_away_score: parseInt(s?.away ?? 0),
       });
@@ -637,217 +613,144 @@ export default function Dashboard() {
     setLocked(true);
   };
 
-  // keep resetAndRegenerate only as a debug escape hatch — no-op now
-  const resetAndRegenerate = async (stageKey) => {
-    if (!confirm(`Clear saved predictions for ${STAGE_LABELS[stageKey]}?`)) return;
-    // Bracket is now purely client-side — nothing to regenerate in DB
-    setAdvancingStage(null);
-  };
-
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
   };
 
-  // Use computed bracket — each user sees their own personal knockout bracket
   const byStage = {
     group: bracket.group || [],
-    R32:   bracket.R32   || [],
-    R16:   bracket.R16   || [],
-    QF:    bracket.QF    || [],
-    SF:    bracket.SF    || [],
+    R32: bracket.R32 || [],
+    R16: bracket.R16 || [],
+    QF:  bracket.QF  || [],
+    SF:  bracket.SF  || [],
     Final: bracket.Final || [],
   };
 
-  // Which stages have content (populated or have placeholder rows)
   const visibleStages = STAGE_ORDER.filter((s) => byStage[s].length > 0);
 
-  // Completion check for each stage
   const isStageComplete = (stage) => {
     const ms = byStage[stage];
-    if (!ms.length) return false;
-    return ms.every((m) => savedIds.has(m.id));
+    return ms.length > 0 && ms.every((m) => savedIds.has(m.id));
   };
 
-  // Which stage is the current "active" one (first incomplete)
   const currentActiveStage = visibleStages.find((s) => {
     const ms = byStage[s];
     if (!ms.length) return false;
-    // Knockout stage with all TBDs = waiting, not yet "active"
-    if (s !== "group") {
-      const allTBD = ms.every((m) => !m.home_team || m.home_team === "TBD");
-      if (allTBD) return false;
-    }
+    if (s !== "group" && ms.every((m) => !m.home_team || m.home_team === "TBD")) return false;
     return !isStageComplete(s);
   }) || visibleStages[visibleStages.length - 1];
 
   const groupSavedCount = byStage.group.filter((m) => savedIds.has(m.id)).length;
   const groupTotal = byStage.group.length;
+  const isAdmin = user?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL;
 
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: "100vh",
-        background: S.bg,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: S.textSoft,
-        fontFamily: "'Segoe UI', system-ui, sans-serif",
-        fontSize: 16,
-      }}>
-        Loading your predictions...
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={{
+      minHeight: "100vh", background: S.bg, display: "flex",
+      alignItems: "center", justifyContent: "center",
+      color: S.textSoft, fontFamily: "'Segoe UI', system-ui, sans-serif", fontSize: 16,
+    }}>
+      Loading your predictions...
+    </div>
+  );
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: S.bg,
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
-      color: S.text,
-    }}>
-      {/* Top nav */}
+    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: S.text }}>
+      {/* Header */}
       <header style={{
-        background: S.surface,
-        borderBottom: `1px solid ${S.border}`,
-        padding: "0 32px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        height: 64,
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
+        background: S.surface, borderBottom: `1px solid ${S.border}`,
+        padding: isMobile ? "0 12px" : "0 32px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        height: isMobile ? 52 : 64, position: "sticky", top: 0, zIndex: 100,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 22 }}>⚽</span>
-          <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" }}>
-            World Cup Predictor
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: isMobile ? 18 : 22 }}>⚽</span>
+          {!isMobile && (
+            <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" }}>
+              World Cup Predictor
+            </span>
+          )}
+          {isMobile && (
+            <span style={{ fontWeight: 800, fontSize: 15 }}>WC Predictor</span>
+          )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {user?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL && (
-            <button
-              onClick={() => window.location.href = "/admin"}
-              style={{
-                padding: "8px 14px",
-                background: "transparent",
-                border: `1px solid ${S.border}`,
-                borderRadius: 8,
-                color: S.muted,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              ⚙️ Admin
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12 }}>
+          {isAdmin && (
+            <button onClick={() => window.location.href = "/admin"} style={{
+              padding: isMobile ? "6px 10px" : "8px 14px",
+              background: "transparent", border: `1px solid ${S.border}`,
+              borderRadius: 8, color: S.muted, fontSize: isMobile ? 12 : 13, cursor: "pointer",
+            }}>
+              ⚙️{!isMobile && " Admin"}
             </button>
           )}
-          <button
-            onClick={() => window.location.href = "/leaderboard"}
-            style={{
-              padding: "8px 16px",
-              background: "transparent",
-              border: `1px solid ${S.border}`,
-              borderRadius: 8,
-              color: S.textSoft,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            🏆 Leaderboard
-          </button>
-          <div style={{
-            padding: "6px 12px",
-            background: "#0f172a",
-            border: `1px solid ${S.border}`,
-            borderRadius: 8,
-            color: S.muted,
-            fontSize: 12,
+          <button onClick={() => window.location.href = "/leaderboard"} style={{
+            padding: isMobile ? "6px 10px" : "8px 16px",
+            background: "transparent", border: `1px solid ${S.border}`,
+            borderRadius: 8, color: S.textSoft, fontSize: isMobile ? 12 : 13, fontWeight: 600, cursor: "pointer",
           }}>
-            {user?.email}
-          </div>
-          <button
-            onClick={logout}
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              border: `1px solid ${S.border}`,
-              borderRadius: 8,
-              color: S.muted,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Sign out
+            🏆{!isMobile && " Leaderboard"}
+          </button>
+          {!isMobile && (
+            <div style={{
+              padding: "6px 12px", background: "#0f172a",
+              border: `1px solid ${S.border}`, borderRadius: 8, color: S.muted, fontSize: 12,
+            }}>
+              {user?.email}
+            </div>
+          )}
+          <button onClick={logout} style={{
+            padding: isMobile ? "6px 10px" : "8px 14px",
+            background: "transparent", border: `1px solid ${S.border}`,
+            borderRadius: 8, color: S.muted, fontSize: isMobile ? 12 : 13, cursor: "pointer",
+          }}>
+            {isMobile ? "↩" : "Sign out"}
           </button>
         </div>
       </header>
 
-      <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px" }}>
+      <main style={{ maxWidth: 860, margin: "0 auto", padding: isMobile ? "14px 10px" : "32px 24px" }}>
         {/* Locked banner */}
         {locked && (
           <div style={{
-            background: "#052e16",
-            border: "1px solid #16a34a",
-            borderRadius: 12,
-            padding: "16px 20px",
-            marginBottom: 28,
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
+            background: "#052e16", border: "1px solid #16a34a", borderRadius: 12,
+            padding: isMobile ? "12px 14px" : "16px 20px", marginBottom: 16,
+            display: "flex", alignItems: "center", gap: 10,
           }}>
-            <span style={{ fontSize: 22 }}>🔒</span>
+            <span style={{ fontSize: 20 }}>🔒</span>
             <div>
-              <div style={{ color: "#86efac", fontWeight: 700, fontSize: 15 }}>
-                Predictions locked — you&apos;re in!
-              </div>
-              <div style={{ color: "#4ade80", fontSize: 13, marginTop: 2 }}>
-                Your predictions have been submitted. Good luck!
-              </div>
+              <div style={{ color: "#86efac", fontWeight: 700, fontSize: 14 }}>Predictions locked — you&apos;re in!</div>
+              <div style={{ color: "#4ade80", fontSize: 12, marginTop: 2 }}>Your predictions have been submitted. Good luck!</div>
             </div>
           </div>
         )}
 
-        {/* Action bar (only when not locked) */}
+        {/* Action bar */}
         {!locked && (
           <div style={{
-            background: "#0c1a2e",
-            border: `1px solid ${S.border}`,
-            borderRadius: 12,
-            padding: "14px 20px",
-            marginBottom: 24,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 12,
+            background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12,
+            padding: isMobile ? "12px 14px" : "14px 20px", marginBottom: 16,
+            display: "flex", alignItems: isMobile ? "stretch" : "center",
+            flexDirection: isMobile ? "column" : "row",
+            justifyContent: "space-between", gap: 10,
           }}>
             <div>
-              <div style={{ color: S.text, fontWeight: 700, fontSize: 15 }}>
-                Make your predictions
-              </div>
-              <div style={{ color: S.muted, fontSize: 13, marginTop: 2 }}>
+              <div style={{ color: S.text, fontWeight: 700, fontSize: 14 }}>Make your predictions</div>
+              <div style={{ color: S.muted, fontSize: 12, marginTop: 2 }}>
                 {isStageComplete("group")
-                  ? "Group stage complete — knockout rounds will fill in automatically"
+                  ? "Group stage complete — knockout rounds fill in automatically"
                   : `Group stage: ${groupSavedCount} of ${groupTotal} saved`}
               </div>
             </div>
             <button
               onClick={lockPredictions}
               style={{
-                padding: "9px 20px",
+                padding: "10px 20px",
                 background: "linear-gradient(135deg, #16a34a, #22c55e)",
-                border: "none",
-                borderRadius: 8,
-                color: "white",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
+                border: "none", borderRadius: 8, color: "white",
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
                 boxShadow: "0 4px 12px rgba(34,197,94,0.25)",
               }}
             >
@@ -858,19 +761,15 @@ export default function Dashboard() {
 
         {/* Stage tabs */}
         <div style={{
-          display: "flex",
-          gap: 4,
-          marginBottom: 32,
-          background: S.surface,
-          borderRadius: 10,
-          padding: 4,
-          border: `1px solid ${S.border}`,
-          overflowX: "auto",
+          display: "flex", gap: 3, marginBottom: isMobile ? 16 : 28,
+          background: S.surface, borderRadius: 10, padding: 3,
+          border: `1px solid ${S.border}`, overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
         }}>
           {visibleStages.map((stage) => {
             const complete = isStageComplete(stage);
-            const isCurrent = stage === currentActiveStage;
             const isActive = stage === activeTab;
+            const isCurrent = stage === currentActiveStage;
             const ms = byStage[stage];
             const allTBD = stage !== "group" && ms.every((m) => !m.home_team || m.home_team === "TBD");
 
@@ -880,64 +779,40 @@ export default function Dashboard() {
                 onClick={() => setActiveTab(stage)}
                 style={{
                   flex: "0 0 auto",
-                  padding: "9px 14px",
-                  border: "none",
-                  borderRadius: 7,
+                  padding: isMobile ? "8px 10px" : "9px 14px",
+                  border: "none", borderRadius: 7,
                   cursor: allTBD ? "default" : "pointer",
-                  fontWeight: 600,
-                  fontSize: 13,
+                  fontWeight: 600, fontSize: isMobile ? 12 : 13,
                   background: isActive ? S.accent : "transparent",
                   color: isActive ? "white" : allTBD ? S.border : complete ? S.success : isCurrent ? S.text : S.muted,
                   whiteSpace: "nowrap",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
+                  display: "flex", alignItems: "center", gap: 5,
                 }}
               >
-                {complete && !isActive && <span style={{ fontSize: 10 }}>✓</span>}
-                {STAGE_LABELS[stage]}
+                {complete && !isActive && <span style={{ fontSize: 9 }}>✓</span>}
+                {isMobile ? STAGE_LABELS[stage].replace("Quarter-finals", "QF").replace("Semi-finals", "SF").replace("Group Stage", "Groups").replace("Round of ", "R") : STAGE_LABELS[stage]}
               </button>
             );
           })}
         </div>
 
-        {/* Active stage content */}
+        {/* Stage content */}
         {visibleStages.includes(activeTab) && (
-          <>
-            <StageSection
-              stage={activeTab}
-              matches={byStage[activeTab]}
-              scores={scores}
-              predMap={predMap}
-              savedIds={savedIds}
-              locked={locked}
-              onChange={handleChange}
-              onSave={savePrediction}
-              onSaveGroup={saveGroup}
-              isComplete={isStageComplete(activeTab)}
-              isNext={activeTab === currentActiveStage}
-              advancingStage={advancingStage}
-            />
-            {activeTab !== "group" && (
-              <div style={{ textAlign: "center", marginTop: 8 }}>
-                <button
-                  onClick={() => resetAndRegenerate(activeTab)}
-                  disabled={advancingStage != null}
-                  style={{
-                    padding: "6px 14px",
-                    background: "transparent",
-                    border: `1px solid ${S.border}`,
-                    borderRadius: 6,
-                    color: S.muted,
-                    fontSize: 12,
-                    cursor: "pointer",
-                  }}
-                >
-                  ↺ Reset &amp; Regenerate Bracket
-                </button>
-              </div>
-            )}
-          </>
+          <StageSection
+            stage={activeTab}
+            matches={byStage[activeTab]}
+            scores={scores}
+            predMap={predMap}
+            savedIds={savedIds}
+            locked={locked}
+            onChange={handleChange}
+            onSave={savePrediction}
+            onSaveGroup={saveGroup}
+            isComplete={isStageComplete(activeTab)}
+            isNext={activeTab === currentActiveStage}
+            advancingStage={advancingStage}
+            isMobile={isMobile}
+          />
         )}
       </main>
     </div>
