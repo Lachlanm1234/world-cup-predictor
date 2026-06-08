@@ -94,7 +94,17 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={{ padding: 40, fontFamily: "Arial", maxWidth: 800, margin: "auto" }}>
+ <div
+  style={{
+    padding: 40,
+    fontFamily: "Arial",
+    maxWidth: 900,
+    margin: "auto",
+    backgroundColor: "#0f172a",
+    minHeight: "100vh",
+    color: "white"
+  }}
+>
       <h1 style={{ marginBottom: 10 }}>World Cup Predictor</h1>
 
       {!locked && (
@@ -136,13 +146,14 @@ export default function Dashboard() {
       {matches.map((match) => (
         <div
           key={match.id}
-          style={{
-            border: "1px solid #ddd",
-            padding: 15,
-            marginBottom: 15,
-            borderRadius: 8,
-            background: "#fafafa"
-          }}
+         style={{
+  background: "#1e293b",
+  padding: 15,
+  marginBottom: 15,
+  borderRadius: 10,
+  boxShadow: "0 2px 10px rgba(0,0,0,0.3)"
+}}
+
         >
           <p style={{ fontSize: 18, fontWeight: "bold" }}>
             {match.home_team} vs {match.away_team}
@@ -173,10 +184,15 @@ export default function Dashboard() {
               }
               disabled={locked}
               style={{
-                width: 60,
-                marginRight: 10,
-                padding: 5
-              }}
+  width: 60,
+  marginRight: 10,
+  padding: 8,
+  borderRadius: 5,
+  border: "none",
+  background: locked ? "#444" : "#fff",
+  color: locked ? "#aaa" : "#000"
+}}
+
             />
 
             {!locked && (
@@ -188,7 +204,16 @@ export default function Dashboard() {
         </div>
       ))}
 
-      <button onClick={logout} style={{ marginTop: 20 }}>
+      <button onClick={logout} style={{
+  marginBottom: 20,
+  padding: "10px 16px",
+  backgroundColor: "#22c55e",
+  color: "white",
+  border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: "bold"
+}}>
         Logout
       </button>
     </div>
