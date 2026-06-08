@@ -87,6 +87,48 @@ export default function Dashboard() {
     alert("✅ Predictions locked! Good luck.");
   };
 
+import { generateKnockout } from "../lib/tournament";
+
+const runKnockout = async () => {
+  // ⚠️ TEMP TEST DATA (replace later with real logic)
+  const groupWinners = {
+    A: "Team A1",
+    B: "Team B1",
+    C: "Team C1",
+    D: "Team D1",
+    E: "Team E1",
+    F: "Team F1",
+    G: "Team G1",
+    H: "Team H1"
+  };
+
+  const groupRunners = {
+    A: "Team A2",
+    B: "Team B2",
+    C: "Team C2",
+    D: "Team D2",
+    E: "Team E2",
+    F: "Team F2",
+    G: "Team G2",
+    H: "Team H2"
+  };
+
+  const bestThirds = [
+    { group: "A", team: "Team A3" },
+    { group: "C", team: "Team C3" },
+    { group: "D", team: "Team D3" },
+    { group: "F", team: "Team F3" },
+    { group: "G", team: "Team G3" },
+    { group: "H", team: "Team H3" },
+    { group: "J", team: "Team J3" },
+    { group: "K", team: "Team K3" }
+  ];
+
+  await generateKnockout(groupWinners, groupRunners, bestThirds);
+};
+
+
+  
   // Logout
   const logout = async () => {
     await supabase.auth.signOut();
@@ -203,7 +245,11 @@ export default function Dashboard() {
           </div>
         </div>
       ))}
-
+<button onClick={runKnockout}
+  style={{ marginTop: 20, marginRight: 10 }}
+>
+  Generate Knockout Stage
+</button>
       <button onClick={logout} style={{
   marginBottom: 20,
   padding: "10px 16px",
