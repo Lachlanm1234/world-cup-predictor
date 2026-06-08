@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabase";
-import { computeFullBracket, DB_STAGE } from "../lib/tournament";
+import { computeFullBracket, calculateGroupStandings, DB_STAGE } from "../lib/tournament";
 
 const S = {
   bg: "#0a0f1e",
@@ -316,7 +316,110 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
 }
 
 
-function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSave, onSaveGroup, isComplete, isNext, advancingStage }) {
+function Best3rdTable({ groupMatches, predMap }) {
+  const allThirds = useMemo(() => {
+    const groups = {};
+    groupMatches.forEach((match) => {
+      const g = match.stage?.replace("Group ", "").trim();
+      if (!g || g.length > 1) return;
+      const pred = predMap[match.id];
+      if (!pred) return;
+      const home = match.home_team, away = match.away_team;
+      const hg = Number(pred.predicted_home_score), ag = Number(pred.predicted_away_score);
+      if (!groups[g]) groups[g] = {};
+      if (!groups[g][home]) groups[g][home] = { pts: 0, gd: 0, gf: 0, ga: 0, p: 0, w: 0, d: 0, l: 0 };
+      if (!groups[g][away]) groups[g][away] = { pts: 0, gd: 0, gf: 0, ga: 0, p: 0, w: 0, d: 0, l: 0 };
+      groups[g][home].p++; groups[g][away].p++;
+      groups[g][home].gf += hg; groups[g][home].ga += ag;
+      groups[g][away].gf += ag; groups[g][away].ga += hg;
+      groups[g][home].gd = groups[g][home].gf - groups[g][home].ga;
+      groups[g][away].gd = groups[g][away].gf - groups[g][away].ga;
+      if (hg > ag)      { groups[g][home].w++; groups[g][away].l++; groups[g][home].pts += 3; }
+      else if (ag > hg) { groups[g][away].w++; groups[g][home].l++; groups[g][away].pts += 3; }
+      else              { groups[g][home].d++; groups[g][away].d++; groups[g][home].pts++; groups[g][away].pts++; }
+    });
+    const thirds = [];
+    Object.keys(groups).forEach((g) => {
+      const ranked = Object.entries(groups[g]).sort((a, b) =>
+        b[1].pts - a[1].pts || b[1].gd - a[1].gd || b[1].gf - a[1].gf
+      );
+      if (ranked[2]) thirds.push({ group: g, team: ranked[2][0], ...ranked[2][1] });
+    });
+    return thirds.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
+  }, [groupMatches, predMap]);
+
+  if (allThirds.length === 0) return null;
+
+  return (
+    <div style={{
+      background: S.card,
+      border: `1px solid ${S.border}`,
+      borderRadius: 14,
+      overflow: "hidden",
+      marginTop: 32,
+      marginBottom: 8,
+    }}>
+      <div style={{
+        padding: "12px 18px",
+        background: "#161f2e",
+        borderBottom: `1px solid ${S.border}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: 14 }}>Best 3rd Place Finishes</span>
+        <span style={{ color: S.muted, fontSize: 12 }}>Top 8 advance to Round of 32</span>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: S.muted, background: S.surface }}>
+            <th style={{ textAlign: "left", padding: "8px 18px", fontWeight: 600, width: 30 }}>#</th>
+            <th style={{ textAlign: "left", padding: "8px 4px", fontWeight: 600 }}>Team</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>Grp</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>P</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>W</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>D</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 28 }}>L</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>GF</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 32 }}>GA</th>
+            <th style={{ textAlign: "center", padding: "8px 4px", fontWeight: 600, width: 36 }}>GD</th>
+            <th style={{ textAlign: "center", padding: "8px 18px 8px 4px", fontWeight: 700, width: 40, color: S.accent }}>Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {allThirds.map((row, i) => {
+            const qualifies = i < 8;
+            const borderColor = qualifies ? S.success + "44" : S.border;
+            return (
+              <tr key={row.group} style={{
+                borderTop: `1px solid ${S.border}`,
+                background: qualifies ? "#1a2d1a" : i === 8 ? "#1f1a10" : "transparent",
+              }}>
+                <td style={{ padding: "7px 18px", color: qualifies ? S.success : S.muted, fontWeight: 700 }}>{i + 1}</td>
+                <td style={{ padding: "7px 4px", color: qualifies ? S.text : S.textSoft, fontWeight: qualifies ? 600 : 400 }}>{row.team}</td>
+                <td style={{ padding: "7px 4px", textAlign: "center", color: S.muted }}>{row.group}</td>
+                {["p","w","d","l","gf","ga","gd"].map((k) => (
+                  <td key={k} style={{ padding: "7px 4px", textAlign: "center", color: S.textSoft }}>{row[k]}</td>
+                ))}
+                <td style={{ padding: "7px 18px 7px 4px", textAlign: "center", color: qualifies ? S.success : S.text, fontWeight: 700 }}>{row.pts}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 16, fontSize: 11, color: S.muted }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#1a2d1a", display: "inline-block" }} /> Advances to R32
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#1f1a10", display: "inline-block" }} /> 9th (eliminated)
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function StageSection({ stage, matches, scores, predMap, savedIds, locked, onChange, onSave, onSaveGroup, isComplete, isNext, advancingStage }) {
   const label = STAGE_LABELS[stage] || stage;
   const savedCount = matches.filter((m) => savedIds.has(m.id)).length;
   const total = matches.length;
@@ -376,6 +479,8 @@ function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSa
             onSaveGroup={onSaveGroup}
           />
         ))}
+
+        <Best3rdTable groupMatches={matches} predMap={predMap} />
       </div>
     );
   }
@@ -786,6 +891,7 @@ export default function Dashboard() {
               stage={activeTab}
               matches={byStage[activeTab]}
               scores={scores}
+              predMap={predMap}
               savedIds={savedIds}
               locked={locked}
               onChange={handleChange}
