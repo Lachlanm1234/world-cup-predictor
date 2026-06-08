@@ -1,7 +1,56 @@
+import { useState } from "react";
+import { supabase } from "../lib/supabase";
+
 export default function Home() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const login = async () => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+    } else {
+      window.location.href = "/dashboard";
+    }
+  };
+
+  const signUp = async () => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Check your email!");
+    }
+  };
+
   return (
     <div style={{ padding: 40 }}>
-      <h1>App is alive ✅</h1>
+      <h1>World Cup Predictor</h1>
+
+      <input
+        placeholder="Email"
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <br />
+
+      <input
+        type="password"
+        placeholder="Password"
+        onChange={(e) => setPassword(e.target.value)}
+      />
+
+      <br /><br />
+
+      <button onClick={login}>Login</button>
+      <button onClick={signUp}>Sign Up</button>
     </div>
   );
 }
