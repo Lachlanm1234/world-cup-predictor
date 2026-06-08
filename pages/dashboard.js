@@ -401,6 +401,33 @@ export default function Dashboard() {
     setLocked(true);
   };
 
+  const resetAndRegenerate = async (stageKey) => {
+    const dbStage = DB_STAGE[stageKey];
+    if (!dbStage) return;
+    if (!confirm(`Reset and regenerate ${STAGE_LABELS[stageKey]}? This will overwrite the current bracket.`)) return;
+    setAdvancingStage(stageKey);
+    try {
+      // Clear all team names in this stage
+      const stageMatches = matches.filter((m) => isStageMatch(m, stageKey));
+      for (const m of stageMatches) {
+        await supabase.from("matches").update({ home_team: "TBD", away_team: "TBD" }).eq("id", m.id);
+      }
+      // Re-run generation
+      if (stageKey === "R32") {
+        await generateR32FromPredictions(user.id);
+      } else {
+        const prev = STAGE_SEQUENCE.find((s) => s.to === stageKey);
+        if (prev) await advanceRoundFromPredictions(user.id, prev.from, stageKey);
+      }
+      const { data: refreshed } = await supabase.from("matches").select("*");
+      setMatches(refreshed || []);
+    } catch (e) {
+      console.error("Regenerate failed:", e);
+    } finally {
+      setAdvancingStage(null);
+    }
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
@@ -642,18 +669,39 @@ export default function Dashboard() {
 
         {/* Active stage content */}
         {visibleStages.includes(activeTab) && (
-          <StageSection
-            stage={activeTab}
-            matches={byStage[activeTab]}
-            scores={scores}
-            savedIds={savedIds}
-            locked={locked}
-            onChange={handleChange}
-            onSave={savePrediction}
-            isComplete={isStageComplete(activeTab)}
-            isNext={activeTab === currentActiveStage}
-            advancingStage={advancingStage}
-          />
+          <>
+            <StageSection
+              stage={activeTab}
+              matches={byStage[activeTab]}
+              scores={scores}
+              savedIds={savedIds}
+              locked={locked}
+              onChange={handleChange}
+              onSave={savePrediction}
+              isComplete={isStageComplete(activeTab)}
+              isNext={activeTab === currentActiveStage}
+              advancingStage={advancingStage}
+            />
+            {activeTab !== "group" && (
+              <div style={{ textAlign: "center", marginTop: 8 }}>
+                <button
+                  onClick={() => resetAndRegenerate(activeTab)}
+                  disabled={advancingStage != null}
+                  style={{
+                    padding: "6px 14px",
+                    background: "transparent",
+                    border: `1px solid ${S.border}`,
+                    borderRadius: 6,
+                    color: S.muted,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  ↺ Reset &amp; Regenerate Bracket
+                </button>
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>
