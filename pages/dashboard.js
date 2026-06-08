@@ -301,7 +301,9 @@ export default function Dashboard() {
 
     setLocked(userRow?.predictions_locked ?? false);
 
-    const { data: matchData } = await supabase.from("matches").select("*");
+    const { data: matchData, error: matchErr } = await supabase.from("matches").select("*");
+    console.log("matches fetched:", matchData?.length, matchErr);
+    console.log("sample match:", matchData?.[0]);
     const { data: predData } = await supabase
       .from("predictions")
       .select("*")
