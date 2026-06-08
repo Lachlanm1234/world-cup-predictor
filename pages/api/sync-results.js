@@ -1,6 +1,5 @@
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// football-data.org v4 — 2026 FIFA World Cup competition code is "WC"
 const FD_BASE = "https://api.football-data.org/v4";
 const FD_KEY = process.env.FOOTBALL_DATA_API_KEY;
 
@@ -8,12 +7,26 @@ async function fdFetch(path) {
   const res = await fetch(`${FD_BASE}${path}`, {
     headers: { "X-Auth-Token": FD_KEY },
   });
+
+  // Respect rate-limit headers — log remaining quota so we can see it in Render logs
+  const remaining = res.headers.get("X-Requests-Available-Minute");
+  const reset = res.headers.get("X-RequestCounter-Reset");
+  console.log(`football-data.org [${path}] status=${res.status} remaining=${remaining} reset=${reset}s`);
+
+  if (res.status === 429) {
+    const wait = Number(reset ?? 60);
+    throw new Error(`Rate limited — ${remaining} requests left, resets in ${wait}s. Try again shortly.`);
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`football-data.org ${path} → ${res.status}: ${text}`);
   }
+
   return res.json();
 }
+
+const normalise = (s) => (s ?? "").toLowerCase().replace(/[^a-z]/g, "");
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
@@ -25,21 +38,18 @@ export default async function handler(req, res) {
   if (!FD_KEY) return res.status(500).json({ error: "FOOTBALL_DATA_API_KEY not set" });
 
   try {
-    // Fetch all WC matches — returns up to 100 per page; WC has 104 total
-    const data = await fdFetch("/competitions/WC/matches?limit=200");
-    const matches = data.matches ?? [];
+    // Single request — all 104 WC matches in one call
+    const data = await fdFetch("/competitions/WC/matches");
+    const apiMatches = data.matches ?? [];
+    const finished = apiMatches.filter((m) => m.status === "FINISHED");
 
-    const finished = matches.filter((m) => m.status === "FINISHED");
-
-    // Load our DB matches for name-based lookup
+    // Load our DB matches
     const { data: dbMatches, error: dbErr } = await supabaseAdmin
       .from("matches")
       .select("id, home_team, away_team");
     if (dbErr) throw dbErr;
 
-    // Normalise team names to lower-case for fuzzy matching
-    const normalise = (s) => (s ?? "").toLowerCase().replace(/[^a-z]/g, "");
-
+    // Index by normalised "home|away" for name-tolerant matching
     const dbIndex = {};
     dbMatches.forEach((m) => {
       dbIndex[`${normalise(m.home_team)}|${normalise(m.away_team)}`] = m.id;
@@ -49,13 +59,20 @@ export default async function handler(req, res) {
     const notMatched = [];
 
     for (const match of finished) {
-      const homeName = match.homeTeam?.name ?? match.homeTeam?.shortName ?? "";
-      const awayName = match.awayTeam?.name ?? match.awayTeam?.shortName ?? "";
-      const key = `${normalise(homeName)}|${normalise(awayName)}`;
-      const dbId = dbIndex[key];
+      // football-data.org provides both name and shortName — try both
+      const homeNames = [match.homeTeam?.name, match.homeTeam?.shortName, match.homeTeam?.tla].filter(Boolean);
+      const awayNames = [match.awayTeam?.name, match.awayTeam?.shortName, match.awayTeam?.tla].filter(Boolean);
+
+      let dbId = null;
+      outer: for (const h of homeNames) {
+        for (const a of awayNames) {
+          const key = `${normalise(h)}|${normalise(a)}`;
+          if (dbIndex[key]) { dbId = dbIndex[key]; break outer; }
+        }
+      }
 
       if (!dbId) {
-        notMatched.push(`${homeName} v ${awayName}`);
+        notMatched.push(`${match.homeTeam?.name} v ${match.awayTeam?.name}`);
         continue;
       }
 
