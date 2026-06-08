@@ -85,42 +85,108 @@ export default function Dashboard() {
   };
 
   // 🔥 GENERATE KNOCKOUT (TEST VERSION)
-  const runKnockout = async () => {
-    const groupWinners = {
-      A: "Team A1",
-      B: "Team B1",
-      C: "Team C1",
-      D: "Team D1",
-      E: "Team E1",
-      F: "Team F1",
-      G: "Team G1",
-      H: "Team H1"
-    };
+const runKnockout = async () => {
+  const { data: matches } = await supabase.from("matches").select("*");
 
-    const groupRunners = {
-      A: "Team A2",
-      B: "Team B2",
-      C: "Team C2",
-      D: "Team D2",
-      E: "Team E2",
-      F: "Team F2",
-      G: "Team G2",
-      H: "Team H2"
-    };
+  const { data: { user } } = await supabase.auth.getUser();
 
-    const bestThirds = [
-      { group: "A", team: "Team A3" },
-      { group: "C", team: "Team C3" },
-      { group: "D", team: "Team D3" },
-      { group: "F", team: "Team F3" },
-      { group: "G", team: "Team G3" },
-      { group: "H", team: "Team H3" },
-      { group: "J", team: "Team J3" },
-      { group: "K", team: "Team K3" }
-    ];
+  const { data: predictions } = await supabase
+    .from("predictions")
+    .select("*")
+    .eq("user_id", user.id);
 
-    await generateKnockout(groupWinners, groupRunners, bestThirds);
-  };
+  // ✅ Build prediction lookup
+  const predictionMap = {};
+  predictions.forEach((p) => {
+    predictionMap[p.match_id] = p;
+  });
+
+  // ✅ GROUP TABLES
+  const groups = {};
+
+  matches.forEach((match) => {
+    if (!match.group) return; // ensure group field exists (A, B, C...)
+
+    if (!groups[match.group]) {
+      groups[match.group] = {};
+    }
+
+    const home = match.home_team;
+    const away = match.away_team;
+
+    const prediction = predictionMap[match.id];
+
+    if (!prediction) return;
+
+    const homeGoals = prediction.predicted_home_score;
+    const awayGoals = prediction.predicted_away_score;
+
+    // init teams
+    if (!groups[match.group][home]) {
+      groups[match.group][home] = { pts: 0, gd: 0, gf: 0 };
+    }
+    if (!groups[match.group][away]) {
+      groups[match.group][away] = { pts: 0, gd: 0, gf: 0 };
+    }
+
+    // update stats
+    groups[match.group][home].gf += homeGoals;
+    groups[match.group][home].gd += homeGoals - awayGoals;
+
+    groups[match.group][away].gf += awayGoals;
+    groups[match.group][away].gd += awayGoals - homeGoals;
+
+    if (homeGoals > awayGoals) {
+      groups[match.group][home].pts += 3;
+    } else if (awayGoals > homeGoals) {
+      groups[match.group][away].pts += 3;
+    } else {
+      groups[match.group][home].pts += 1;
+      groups[match.group][away].pts += 1;
+    }
+  });
+
+  // ✅ EXTRACT TOP TEAMS
+  const groupWinners = {};
+  const groupRunners = {};
+  const thirdPlace = [];
+
+  Object.keys(groups).forEach((groupKey) => {
+    const teams = Object.entries(groups[groupKey]);
+
+    const ranked = teams.sort((a, b) => {
+      if (b[1].pts !== a[1].pts) return b[1].pts - a[1].pts;
+      if (b[1].gd !== a[1].gd) return b[1].gd - a[1].gd;
+      return b[1].gf - a[1].gf;
+    });
+
+    groupWinners[groupKey] = ranked[0][0];
+    groupRunners[groupKey] = ranked[1][0];
+
+    thirdPlace.push({
+      group: groupKey,
+      team: ranked[2][0],
+      stats: ranked[2][1]
+    });
+  });
+
+  // ✅ SORT ALL 3RD PLACE TEAMS
+  thirdPlace.sort((a, b) => {
+    if (b.stats.pts !== a.stats.pts) return b.stats.pts - a.stats.pts;
+    if (b.stats.gd !== a.stats.gd) return b.stats.gd - a.stats.gd;
+    return b.stats.gf - a.stats.gf;
+  });
+
+  // ✅ TAKE TOP 8
+  const bestThirds = thirdPlace.slice(0, 8);
+
+  console.log("Winners:", groupWinners);
+  console.log("Runners:", groupRunners);
+  console.log("Best 3rds:", bestThirds);
+
+  // ✅ GENERATE KNOCKOUT
+  await generateKnockout(groupWinners, groupRunners, bestThirds);
+};
 
   // Logout
   const logout = async () => {
