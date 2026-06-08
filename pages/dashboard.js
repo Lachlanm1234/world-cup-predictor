@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
-import { generateKnockout } from "../lib/tournament";
+import {
+  generateR32FromPredictions,
+  advanceRoundFromPredictions,
+} from "../lib/tournament";
 
 const S = {
   bg: "#0a0f1e",
   surface: "#111827",
   card: "#1e293b",
-  cardHover: "#243447",
   border: "#1f2d3d",
   accent: "#3b82f6",
   accentDark: "#1d4ed8",
@@ -16,6 +18,23 @@ const S = {
   text: "#f1f5f9",
   textSoft: "#94a3b8",
 };
+
+const STAGE_ORDER = ["group", "R32", "R16", "QF", "SF", "Final"];
+const STAGE_LABELS = {
+  group: "Group Stage",
+  R32: "Round of 32",
+  R16: "Round of 16",
+  QF: "Quarter-finals",
+  SF: "Semi-finals",
+  Final: "Final",
+};
+const STAGE_SEQUENCE = [
+  { from: "group", to: "R32" },
+  { from: "R32",   to: "R16" },
+  { from: "R16",   to: "QF" },
+  { from: "QF",    to: "SF" },
+  { from: "SF",    to: "Final" },
+];
 
 function Badge({ children, color = S.accent }) {
   return (
@@ -36,48 +55,37 @@ function Badge({ children, color = S.accent }) {
 }
 
 function MatchCard({ match, score, locked, onChange, onSave, saved }) {
+  const hasPrediction = score?.home !== undefined && score?.home !== "" &&
+                        score?.away !== undefined && score?.away !== "";
+
   return (
     <div style={{
       background: S.card,
-      border: `1px solid ${S.border}`,
+      border: `1px solid ${saved ? S.successDark + "88" : S.border}`,
       borderRadius: 12,
       padding: "18px 20px",
       marginBottom: 10,
       transition: "border-color 0.2s",
     }}>
-      {/* Group badge */}
-      {match.group && (
-        <div style={{ marginBottom: 10 }}>
-          <Badge color={S.muted}>Group {match.group}</Badge>
-        </div>
-      )}
-
-      {/* Teams + score row */}
       <div style={{
         display: "grid",
         gridTemplateColumns: "1fr auto 1fr",
         alignItems: "center",
         gap: 16,
       }}>
-        {/* Home team */}
         <div style={{ textAlign: "right" }}>
           <span style={{ color: S.text, fontWeight: 700, fontSize: 16 }}>
-            {match.home_team}
+            {match.home_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
 
-        {/* Score inputs */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input
             type="number"
             min="0"
             value={score?.home ?? ""}
             onChange={(e) => onChange(match.id, "home", e.target.value)}
-            disabled={locked}
+            disabled={locked || !match.home_team || match.home_team === "TBD"}
             placeholder="0"
             style={{
               width: 52,
@@ -90,7 +98,7 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
               fontSize: 20,
               fontWeight: 700,
               outline: "none",
-              opacity: locked ? 0.6 : 1,
+              opacity: (locked || !match.home_team || match.home_team === "TBD") ? 0.4 : 1,
             }}
           />
           <span style={{ color: S.muted, fontWeight: 700, fontSize: 18 }}>–</span>
@@ -99,7 +107,7 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
             min="0"
             value={score?.away ?? ""}
             onChange={(e) => onChange(match.id, "away", e.target.value)}
-            disabled={locked}
+            disabled={locked || !match.away_team || match.away_team === "TBD"}
             placeholder="0"
             style={{
               width: 52,
@@ -112,21 +120,19 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
               fontSize: 20,
               fontWeight: 700,
               outline: "none",
-              opacity: locked ? 0.6 : 1,
+              opacity: (locked || !match.away_team || match.away_team === "TBD") ? 0.4 : 1,
             }}
           />
         </div>
 
-        {/* Away team */}
         <div style={{ textAlign: "left" }}>
           <span style={{ color: S.text, fontWeight: 700, fontSize: 16 }}>
-            {match.away_team}
+            {match.away_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
           </span>
         </div>
       </div>
 
-      {/* Save button row */}
-      {!locked && (
+      {!locked && match.home_team && match.home_team !== "TBD" && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
           <button
             onClick={() => onSave(match.id)}
@@ -139,15 +145,121 @@ function MatchCard({ match, score, locked, onChange, onSave, saved }) {
               fontSize: 13,
               fontWeight: 600,
               cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
             }}
           >
             {saved ? "✓ Saved" : "Save"}
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSave, isComplete, isNext, advancingStage }) {
+  const label = STAGE_LABELS[stage] || stage;
+  const savedCount = matches.filter((m) => savedIds.has(m.id)).length;
+  const total = matches.length;
+  const hasTBD = matches.some((m) => !m.home_team || m.home_team === "TBD");
+
+  // Group stage: group by letter; knockout: flat list
+  const grouped = stage === "group"
+    ? matches.reduce((acc, m) => {
+        const g = m.group || "Other";
+        if (!acc[g]) acc[g] = [];
+        acc[g].push(m);
+        return acc;
+      }, {})
+    : { all: matches };
+
+  return (
+    <div style={{ marginBottom: 40 }}>
+      {/* Stage header */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 20,
+      }}>
+        <div>
+          <h2 style={{ color: S.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
+            {label}
+          </h2>
+          <p style={{ color: S.muted, fontSize: 13, margin: "4px 0 0" }}>
+            {hasTBD
+              ? "Teams will be filled in once the previous round is complete"
+              : isComplete
+              ? `All ${total} predictions saved`
+              : `${savedCount} of ${total} saved`
+            }
+          </p>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {isComplete && <Badge color={S.success}>✓ Complete</Badge>}
+          {advancingStage === stage && <Badge color={S.accent}>Generating...</Badge>}
+        </div>
+      </div>
+
+      {/* Progress bar (group stage only) */}
+      {stage === "group" && !locked && total > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 6,
+            fontSize: 12,
+            color: S.muted,
+          }}>
+            <span>Prediction progress</span>
+            <span>{Math.round((savedCount / total) * 100)}%</span>
+          </div>
+          <div style={{ height: 4, background: S.border, borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              width: `${(savedCount / total) * 100}%`,
+              background: "linear-gradient(90deg, #2563eb, #22c55e)",
+              borderRadius: 99,
+              transition: "width 0.4s ease",
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Matches */}
+      {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([groupKey, groupMatches]) => (
+        <div key={groupKey}>
+          {stage === "group" && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 10,
+            }}>
+              <span style={{
+                color: S.textSoft,
+                fontSize: 12,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "1px",
+              }}>
+                Group {groupKey}
+              </span>
+              <div style={{ flex: 1, height: 1, background: S.border }} />
+              <span style={{ color: S.muted, fontSize: 12 }}>{groupMatches.length} matches</span>
+            </div>
+          )}
+          {groupMatches.map((match) => (
+            <MatchCard
+              key={match.id}
+              match={match}
+              score={scores[match.id]}
+              locked={locked}
+              onChange={onChange}
+              onSave={onSave}
+              saved={savedIds.has(match.id)}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -159,12 +271,10 @@ export default function Dashboard() {
   const [locked, setLocked] = useState(false);
   const [savedIds, setSavedIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("group");
+  const [advancingStage, setAdvancingStage] = useState(null);
 
-  useEffect(() => {
-    loadUserAndData();
-  }, []);
-
-  const loadUserAndData = async () => {
+  const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { window.location.href = "/"; return; }
     setUser(user);
@@ -178,14 +288,14 @@ export default function Dashboard() {
     setLocked(userRow?.predictions_locked ?? false);
 
     const { data: matchData } = await supabase.from("matches").select("*");
-    const { data: predictionData } = await supabase
+    const { data: predData } = await supabase
       .from("predictions")
       .select("*")
       .eq("user_id", user.id);
 
     const storedScores = {};
     const saved = new Set();
-    predictionData?.forEach((p) => {
+    predData?.forEach((p) => {
       storedScores[p.match_id] = {
         home: p.predicted_home_score,
         away: p.predicted_away_score,
@@ -197,7 +307,54 @@ export default function Dashboard() {
     setScores(storedScores);
     setSavedIds(saved);
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // After any save, check if a stage just became complete and auto-advance
+  const checkAndAdvance = useCallback(async (currentSavedIds, currentMatches, currentUser) => {
+    for (const { from, to } of STAGE_SEQUENCE) {
+      if (from === "Final") break;
+
+      const fromMatches = currentMatches.filter((m) => {
+        if (from === "group") return m.group != null;
+        return m.stage === from;
+      });
+
+      if (fromMatches.length === 0) continue;
+
+      // Stage is "complete" if every match has a real prediction saved
+      const allSaved = fromMatches.every((m) => currentSavedIds.has(m.id));
+      if (!allSaved) break; // Stages are sequential — stop at first incomplete
+
+      // Check if the next stage already has teams populated (already generated)
+      const toMatches = currentMatches.filter((m) => m.stage === to);
+      if (toMatches.length === 0) break; // No placeholder rows — DB not set up for this stage
+
+      const alreadyPopulated = toMatches.some((m) => m.home_team && m.home_team !== "TBD");
+      if (alreadyPopulated) continue; // Already generated, move to next stage check
+
+      // Generate / advance
+      setAdvancingStage(from);
+      try {
+        if (from === "group") {
+          await generateR32FromPredictions(currentUser.id);
+        } else {
+          await advanceRoundFromPredictions(currentUser.id, from, to);
+        }
+        // Reload matches to get updated team names
+        const { data: refreshed } = await supabase.from("matches").select("*");
+        setMatches(refreshed || []);
+        setActiveTab(to);
+      } catch (e) {
+        console.error("Advance failed:", e);
+      } finally {
+        setAdvancingStage(null);
+      }
+
+      break; // Only advance one stage at a time
+    }
+  }, []);
 
   const handleChange = (matchId, field, value) => {
     if (locked) return;
@@ -217,7 +374,11 @@ export default function Dashboard() {
       predicted_home_score: parseInt(matchScore?.home ?? 0),
       predicted_away_score: parseInt(matchScore?.away ?? 0),
     });
-    setSavedIds((prev) => new Set([...prev, matchId]));
+
+    const newSavedIds = new Set([...savedIds, matchId]);
+    setSavedIds(newSavedIds);
+
+    await checkAndAdvance(newSavedIds, matches, user);
   };
 
   const lockPredictions = async () => {
@@ -226,76 +387,44 @@ export default function Dashboard() {
     setLocked(true);
   };
 
-  const runKnockout = async () => {
-    const { data: matches } = await supabase.from("matches").select("*");
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data: predictions } = await supabase
-      .from("predictions").select("*").eq("user_id", user.id);
-
-    const predictionMap = {};
-    predictions.forEach((p) => { predictionMap[p.match_id] = p; });
-
-    const groups = {};
-    matches.forEach((match) => {
-      if (!match.group) return;
-      if (!groups[match.group]) groups[match.group] = {};
-      const home = match.home_team;
-      const away = match.away_team;
-      const prediction = predictionMap[match.id];
-      if (!prediction) return;
-      const homeGoals = prediction.predicted_home_score;
-      const awayGoals = prediction.predicted_away_score;
-      if (!groups[match.group][home]) groups[match.group][home] = { pts: 0, gd: 0, gf: 0 };
-      if (!groups[match.group][away]) groups[match.group][away] = { pts: 0, gd: 0, gf: 0 };
-      groups[match.group][home].gf += homeGoals;
-      groups[match.group][home].gd += homeGoals - awayGoals;
-      groups[match.group][away].gf += awayGoals;
-      groups[match.group][away].gd += awayGoals - homeGoals;
-      if (homeGoals > awayGoals) { groups[match.group][home].pts += 3; }
-      else if (awayGoals > homeGoals) { groups[match.group][away].pts += 3; }
-      else { groups[match.group][home].pts += 1; groups[match.group][away].pts += 1; }
-    });
-
-    const groupWinners = {};
-    const groupRunners = {};
-    const thirdPlace = [];
-
-    Object.keys(groups).forEach((groupKey) => {
-      const ranked = Object.entries(groups[groupKey]).sort((a, b) => {
-        if (b[1].pts !== a[1].pts) return b[1].pts - a[1].pts;
-        if (b[1].gd !== a[1].gd) return b[1].gd - a[1].gd;
-        return b[1].gf - a[1].gf;
-      });
-      groupWinners[groupKey] = ranked[0][0];
-      groupRunners[groupKey] = ranked[1][0];
-      thirdPlace.push({ group: groupKey, team: ranked[2][0], stats: ranked[2][1] });
-    });
-
-    thirdPlace.sort((a, b) => {
-      if (b.stats.pts !== a.stats.pts) return b.stats.pts - a.stats.pts;
-      if (b.stats.gd !== a.stats.gd) return b.stats.gd - a.stats.gd;
-      return b.stats.gf - a.stats.gf;
-    });
-
-    await generateKnockout(groupWinners, groupRunners, thirdPlace.slice(0, 8));
-    alert("Knockout stage generated!");
-  };
-
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
   };
 
-  // Group matches by group
-  const groupedMatches = matches.reduce((acc, match) => {
-    const key = match.group || match.stage || "Other";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(match);
+  // Organise matches by stage
+  const byStage = STAGE_ORDER.reduce((acc, s) => {
+    acc[s] = matches.filter((m) => {
+      if (s === "group") return m.group != null;
+      return m.stage === s;
+    });
     return acc;
   }, {});
 
-  const savedCount = savedIds.size;
-  const totalCount = matches.length;
+  // Which stages have content (populated or have placeholder rows)
+  const visibleStages = STAGE_ORDER.filter((s) => byStage[s].length > 0);
+
+  // Completion check for each stage
+  const isStageComplete = (stage) => {
+    const ms = byStage[stage];
+    if (!ms.length) return false;
+    return ms.every((m) => savedIds.has(m.id));
+  };
+
+  // Which stage is the current "active" one (first incomplete)
+  const currentActiveStage = visibleStages.find((s) => {
+    const ms = byStage[s];
+    if (!ms.length) return false;
+    // Knockout stage with all TBDs = waiting, not yet "active"
+    if (s !== "group") {
+      const allTBD = ms.every((m) => !m.home_team || m.home_team === "TBD");
+      if (allTBD) return false;
+    }
+    return !isStageComplete(s);
+  }) || visibleStages[visibleStages.length - 1];
+
+  const groupSavedCount = byStage.group.filter((m) => savedIds.has(m.id)).length;
+  const groupTotal = byStage.group.length;
 
   if (loading) {
     return (
@@ -384,9 +513,9 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main style={{ maxWidth: 800, margin: "0 auto", padding: "32px 24px" }}>
-        {/* Status banner */}
-        {locked ? (
+      <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px" }}>
+        {/* Locked banner */}
+        {locked && (
           <div style={{
             background: "#052e16",
             border: "1px solid #16a34a",
@@ -407,13 +536,16 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* Action bar (only when not locked) */}
+        {!locked && (
           <div style={{
             background: "#0c1a2e",
             border: `1px solid ${S.border}`,
             borderRadius: 12,
-            padding: "16px 20px",
-            marginBottom: 28,
+            padding: "14px 20px",
+            marginBottom: 24,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -425,113 +557,90 @@ export default function Dashboard() {
                 Make your predictions
               </div>
               <div style={{ color: S.muted, fontSize: 13, marginTop: 2 }}>
-                {savedCount} of {totalCount} matches saved
+                {isStageComplete("group")
+                  ? "Group stage complete — knockout rounds will fill in automatically"
+                  : `Group stage: ${groupSavedCount} of ${groupTotal} saved`}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                onClick={runKnockout}
-                style={{
-                  padding: "9px 18px",
-                  background: "transparent",
-                  border: `1px solid ${S.border}`,
-                  borderRadius: 8,
-                  color: S.textSoft,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Generate Knockout
-              </button>
-              <button
-                onClick={lockPredictions}
-                style={{
-                  padding: "9px 20px",
-                  background: "linear-gradient(135deg, #16a34a, #22c55e)",
-                  border: "none",
-                  borderRadius: 8,
-                  color: "white",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  boxShadow: "0 4px 12px rgba(34,197,94,0.25)",
-                }}
-              >
-                🔒 Lock Predictions
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Progress bar */}
-        {!locked && totalCount > 0 && (
-          <div style={{ marginBottom: 28 }}>
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: 6,
-              fontSize: 12,
-              color: S.muted,
-            }}>
-              <span>Prediction progress</span>
-              <span>{Math.round((savedCount / totalCount) * 100)}%</span>
-            </div>
-            <div style={{
-              height: 4,
-              background: S.border,
-              borderRadius: 99,
-              overflow: "hidden",
-            }}>
-              <div style={{
-                height: "100%",
-                width: `${(savedCount / totalCount) * 100}%`,
-                background: "linear-gradient(90deg, #2563eb, #22c55e)",
-                borderRadius: 99,
-                transition: "width 0.4s ease",
-              }} />
-            </div>
-          </div>
-        )}
-
-        {/* Matches grouped by group */}
-        {Object.entries(groupedMatches).sort(([a], [b]) => a.localeCompare(b)).map(([group, groupMatches]) => (
-          <div key={group} style={{ marginBottom: 32 }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 14,
-            }}>
-              <h2 style={{
-                color: S.text,
-                fontSize: 14,
+            <button
+              onClick={lockPredictions}
+              style={{
+                padding: "9px 20px",
+                background: "linear-gradient(135deg, #16a34a, #22c55e)",
+                border: "none",
+                borderRadius: 8,
+                color: "white",
+                fontSize: 13,
                 fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "1px",
-                margin: 0,
-              }}>
-                Group {group}
-              </h2>
-              <div style={{ flex: 1, height: 1, background: S.border }} />
-              <span style={{ color: S.muted, fontSize: 12 }}>
-                {groupMatches.length} matches
-              </span>
-            </div>
-
-            {groupMatches.map((match) => (
-              <MatchCard
-                key={match.id}
-                match={match}
-                score={scores[match.id]}
-                locked={locked}
-                onChange={handleChange}
-                onSave={savePrediction}
-                saved={savedIds.has(match.id)}
-              />
-            ))}
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(34,197,94,0.25)",
+              }}
+            >
+              🔒 Lock Predictions
+            </button>
           </div>
-        ))}
+        )}
+
+        {/* Stage tabs */}
+        <div style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 32,
+          background: S.surface,
+          borderRadius: 10,
+          padding: 4,
+          border: `1px solid ${S.border}`,
+          overflowX: "auto",
+        }}>
+          {visibleStages.map((stage) => {
+            const complete = isStageComplete(stage);
+            const isCurrent = stage === currentActiveStage;
+            const isActive = stage === activeTab;
+            const ms = byStage[stage];
+            const allTBD = stage !== "group" && ms.every((m) => !m.home_team || m.home_team === "TBD");
+
+            return (
+              <button
+                key={stage}
+                onClick={() => setActiveTab(stage)}
+                style={{
+                  flex: "0 0 auto",
+                  padding: "9px 14px",
+                  border: "none",
+                  borderRadius: 7,
+                  cursor: allTBD ? "default" : "pointer",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  background: isActive ? S.accent : "transparent",
+                  color: isActive ? "white" : allTBD ? S.border : complete ? S.success : isCurrent ? S.text : S.muted,
+                  whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {complete && !isActive && <span style={{ fontSize: 10 }}>✓</span>}
+                {STAGE_LABELS[stage]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active stage content */}
+        {visibleStages.includes(activeTab) && (
+          <StageSection
+            stage={activeTab}
+            matches={byStage[activeTab]}
+            scores={scores}
+            savedIds={savedIds}
+            locked={locked}
+            onChange={handleChange}
+            onSave={savePrediction}
+            isComplete={isStageComplete(activeTab)}
+            isNext={activeTab === currentActiveStage}
+            advancingStage={advancingStage}
+          />
+        )}
       </main>
     </div>
   );
