@@ -80,56 +80,66 @@ const handleChange = (matchId, field, value) => {
     window.location.href = "/";
   };
 
-  return (
-    <div style={{ padding: 40 }}>
-      <h1>Dashboard</h1>
+return (
+  <div style={{ padding: 40, fontFamily: "Arial" }}>
+    <h1 style={{ marginBottom: 20 }}>World Cup Predictor</h1>
 
-      <button onClick={() => (window.location.href = "/leaderboard")}>
-  View Leaderboard
-</button>
+    <button 
+      onClick={() => (window.location.href = "/leaderboard")}
+      style={{ marginBottom: 20 }}
+    >
+      View Leaderboard
+    </button>
 
-      {user && <p>Logged in as: {user.email}</p>}
+    {user && (
+      <p style={{ marginBottom: 30 }}>
+        Logged in as: <strong>{user.email}</strong>
+      </p>
+    )}
 
-      <h2>Matches</h2>
+    {matches.map((match) => (
+      <div 
+        key={match.id} 
+        style={{
+          border: "1px solid #ccc",
+          padding: 15,
+          marginBottom: 15,
+          borderRadius: 8
+        }}
+      >
+        <p style={{ fontSize: 18, fontWeight: "bold" }}>
+          {match.home_team} vs {match.away_team}
+        </p>
 
-      {matches.length === 0 && <p>No matches found...</p>}
+        <div style={{ marginTop: 10 }}>
+          <input
+            type="number"
+            placeholder="Home"
+            value={scores[match.id]?.home ?? ""}
+            onChange={(e) =>
+              handleChange(match.id, "home", e.target.value)
+            }
+            style={{ width: 60, marginRight: 10 }}
+          />
 
-      {matches.map((match) => (
-        <div key={match.id} style={{ marginBottom: 20 }}>
-          <strong>
-            {match.home_team} vs {match.away_team}
-          </strong>
+          <input
+            type="number"
+            placeholder="Away"
+            value={scores[match.id]?.away ?? ""}
+            onChange={(e) =>
+              handleChange(match.id, "away", e.target.value)
+            }
+            style={{ width: 60, marginRight: 10 }}
+          />
 
-          <div>
-            <input
-  type="number"
-  placeholder="Home"
-  value={scores[match.id]?.home ?? ""}
-  onChange={(e) =>
-    handleChange(match.id, "home", e.target.value)
-  }
-  style={{ width: 50, marginRight: 5 }}
-/>
-
-<input
-  type="number"
-  placeholder="Away"
-  value={scores[match.id]?.away ?? ""}
-  onChange={(e) =>
-    handleChange(match.id, "away", e.target.value)
-  }
-  style={{ width: 50, marginRight: 5 }}
-/>
-
-            <button onClick={() => savePrediction(match.id)}>
-              Save
-            </button>
-          </div>
+          <button onClick={() => savePrediction(match.id)}>
+            Save
+          </button>
         </div>
-      ))}
+      </div>
+    ))}
 
-      <br />
-      <button onClick={logout}>Logout</button>
-    </div>
-  );
-}
+    <button onClick={logout}>Logout</button>
+  </div>
+);
+``
