@@ -46,9 +46,8 @@ const STAGE_SEQUENCE = [
 ];
 
 // A match belongs to group stage if its `group` column starts with "Group "
-const isGroupMatch = (m) => m.group?.startsWith("Group ");
-// A match belongs to a knockout stage by exact string match
-const isStageMatch = (m, key) => m.group === DB_STAGE[key];
+const isGroupMatch = (m) => m.stage?.startsWith("Group ");
+const isStageMatch = (m, key) => m.stage === DB_STAGE[key];
 
 function Badge({ children, color = S.accent }) {
   return (
@@ -178,7 +177,7 @@ function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSa
   // Group stage: group by letter; knockout: flat list
   const grouped = stage === "group"
     ? matches.reduce((acc, m) => {
-        const g = m.group || "Other";
+        const g = m.stage || "Other"; // e.g. "Group A"
         if (!acc[g]) acc[g] = [];
         acc[g].push(m);
         return acc;
@@ -255,7 +254,7 @@ function StageSection({ stage, matches, scores, savedIds, locked, onChange, onSa
                 textTransform: "uppercase",
                 letterSpacing: "1px",
               }}>
-                Group {groupKey}
+                {groupKey}
               </span>
               <div style={{ flex: 1, height: 1, background: S.border }} />
               <span style={{ color: S.muted, fontSize: 12 }}>{groupMatches.length} matches</span>
@@ -302,9 +301,7 @@ export default function Dashboard() {
     setLocked(userRow?.predictions_locked ?? false);
 
     const { data: matchData, error: matchErr } = await supabase.from("matches").select("*");
-    console.log("matches fetched:", matchData?.length, matchErr);
-    console.log("all columns:", matchData?.[0] ? Object.keys(matchData[0]) : "none");
-    console.log("first 3 matches (group+stage):", matchData?.slice(0,3).map(m => ({ group: m.group, stage: m.stage, home: m.home_team })));
+    console.log("matches fetched:", matchData?.length, "stages:", [...new Set(matchData?.map(m => m.stage))]);
     const { data: predData } = await supabase
       .from("predictions")
       .select("*")
