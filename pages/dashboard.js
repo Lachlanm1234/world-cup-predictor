@@ -19,13 +19,22 @@ const S = {
   textSoft: "#94a3b8",
 };
 
+// Maps internal key → exact string stored in the DB's `group` column
+const DB_STAGE = {
+  R32:   "Round of 32",
+  R16:   "Round of 16",
+  QF:    "Quarter Final",   // ⚠️ update if DB uses a different string
+  SF:    "Semi - Final",
+  Final: "Final",
+};
+
 const STAGE_ORDER = ["group", "R32", "R16", "QF", "SF", "Final"];
 const STAGE_LABELS = {
   group: "Group Stage",
-  R32: "Round of 32",
-  R16: "Round of 16",
-  QF: "Quarter-finals",
-  SF: "Semi-finals",
+  R32:   "Round of 32",
+  R16:   "Round of 16",
+  QF:    "Quarter-finals",
+  SF:    "Semi-finals",
   Final: "Final",
 };
 const STAGE_SEQUENCE = [
@@ -35,6 +44,11 @@ const STAGE_SEQUENCE = [
   { from: "QF",    to: "SF" },
   { from: "SF",    to: "Final" },
 ];
+
+// A match belongs to group stage if its `group` column starts with "Group "
+const isGroupMatch = (m) => m.group?.startsWith("Group ");
+// A match belongs to a knockout stage by exact string match
+const isStageMatch = (m, key) => m.group === DB_STAGE[key];
 
 function Badge({ children, color = S.accent }) {
   return (
@@ -317,8 +331,8 @@ export default function Dashboard() {
       if (from === "Final") break;
 
       const fromMatches = currentMatches.filter((m) => {
-        if (from === "group") return !["R32","R16","QF","SF","Final"].includes(m.stage);
-        return m.stage === from;
+        if (from === "group") return isGroupMatch(m);
+        return isStageMatch(m, from);
       });
 
       if (fromMatches.length === 0) continue;
@@ -328,7 +342,7 @@ export default function Dashboard() {
       if (!allSaved) break; // Stages are sequential — stop at first incomplete
 
       // Check if the next stage already has teams populated (already generated)
-      const toMatches = currentMatches.filter((m) => m.stage === to);
+      const toMatches = currentMatches.filter((m) => isStageMatch(m, to));
       if (toMatches.length === 0) break; // No placeholder rows — DB not set up for this stage
 
       const alreadyPopulated = toMatches.some((m) => m.home_team && m.home_team !== "TBD");
@@ -393,13 +407,10 @@ export default function Dashboard() {
   };
 
   // Organise matches by stage
-  const KNOCKOUT_STAGES = new Set(["R32", "R16", "QF", "SF", "Final"]);
-  const isGroupMatch = (m) => !KNOCKOUT_STAGES.has(m.stage);
-
   const byStage = STAGE_ORDER.reduce((acc, s) => {
     acc[s] = matches.filter((m) => {
       if (s === "group") return isGroupMatch(m);
-      return m.stage === s;
+      return isStageMatch(m, s);
     });
     return acc;
   }, {});
