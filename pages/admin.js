@@ -76,6 +76,7 @@ export default function Admin() {
   const [filterStage, setFilterStage] = useState("all");
   const [filterFinished, setFilterFinished] = useState("all");
   const [saveAllStatus, setSaveAllStatus] = useState(null);
+  const [syncFixturesStatus, setSyncFixturesStatus] = useState(null);
 
   useEffect(() => { init(); }, []);
 
@@ -139,6 +140,26 @@ export default function Admin() {
     }
   };
 
+  const syncFixtures = async () => {
+    setSyncFixturesStatus("syncing");
+    try {
+      const res = await fetch("/api/sync-fixtures", {
+        method: "POST",
+        headers: { "x-sync-secret": process.env.NEXT_PUBLIC_SYNC_SECRET || "" },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSyncFixturesStatus(`✓ ${data.updated} fixture${data.updated !== 1 ? "s" : ""} updated`);
+        if (data.updated > 0) await loadMatches();
+      } else {
+        setSyncFixturesStatus(`Error: ${data.error}`);
+      }
+    } catch (e) {
+      setSyncFixturesStatus(`Error: ${e.message}`);
+    }
+    setTimeout(() => setSyncFixturesStatus(null), 4000);
+  };
+
   const saveAllVisible = async () => {
     setSaveAllStatus("saving");
     await Promise.all(filteredMatches.map((m) => saveMatch(m.id)));
@@ -193,12 +214,31 @@ export default function Admin() {
             {finishedCount}/{matches.length}
           </span>
         </div>
-        <button
-          onClick={() => window.location.href = "/dashboard"}
-          style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${S.border}`, borderRadius: 8, color: S.textSoft, fontSize: 13, cursor: "pointer" }}
-        >
-          ← Back
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            <button
+              onClick={syncFixtures}
+              disabled={syncFixturesStatus === "syncing"}
+              style={{
+                padding: "6px 12px", background: syncFixturesStatus?.startsWith("✓") ? S.successDark : "#7c3aed",
+                border: "none", borderRadius: 7, color: "white",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                opacity: syncFixturesStatus === "syncing" ? 0.7 : 1,
+              }}
+            >
+              {syncFixturesStatus === "syncing" ? "Syncing…" : syncFixturesStatus?.startsWith("✓") ? syncFixturesStatus : "↻ Sync Fixtures"}
+            </button>
+            {syncFixturesStatus && !syncFixturesStatus.startsWith("✓") && syncFixturesStatus !== "syncing" && (
+              <span style={{ fontSize: 10, color: "#f87171" }}>{syncFixturesStatus}</span>
+            )}
+          </div>
+          <button
+            onClick={() => window.location.href = "/dashboard"}
+            style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${S.border}`, borderRadius: 8, color: S.textSoft, fontSize: 13, cursor: "pointer" }}
+          >
+            ← Back
+          </button>
+        </div>
       </header>
 
       <main style={{ maxWidth: 680, margin: "0 auto", padding: "16px 12px" }}>
