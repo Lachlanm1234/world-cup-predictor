@@ -84,6 +84,7 @@ function computeGroupTable(groupMatches, scores) {
 function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange, onSaveGroup, isMobile }) {
   const table = computeGroupTable(groupMatches, scores);
   const allSaved = groupMatches.every((m) => savedIds.has(m.id));
+  const anyUnsaved = groupMatches.some((m) => !savedIds.has(m.id));
 
   const standings = (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -133,6 +134,7 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
       border: `1px solid ${allSaved ? S.successDark + "66" : S.border}`,
       borderRadius: 14, marginBottom: 16, overflow: "hidden",
     }}>
+      {/* Group header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 14px", background: "#161f2e", borderBottom: `1px solid ${S.border}`,
@@ -154,6 +156,7 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
       </div>
 
       {isMobile ? (
+        /* Mobile: matches stacked, then standings below */
         <div>
           <div style={{ padding: "12px 14px", borderBottom: `1px solid ${S.border}` }}>
             {groupMatches.map((match) => (
@@ -203,6 +206,7 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
           </div>
         </div>
       ) : (
+        /* Desktop: two columns side by side */
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
           <div style={{ padding: "14px 16px", borderRight: `1px solid ${S.border}` }}>
             {groupMatches.map((match) => (
@@ -369,6 +373,7 @@ function Best3rdTable({ groupMatches, predMap, isMobile }) {
 
   if (allThirds.length === 0) return null;
 
+  // On mobile show fewer columns
   const cols = isMobile
     ? ["p", "w", "d", "l", "gd", "pts"]
     : ["p", "w", "d", "l", "gf", "ga", "gd", "pts"];
@@ -614,27 +619,135 @@ function LiveMatchCard({ match, livePred, onSave, saved, isMobile }) {
   );
 }
 
+function LiveGroupStandings({ groupMatches, isMobile }) {
+  const table = useMemo(() => {
+    const t = {};
+    groupMatches.forEach((m) => {
+      [m.home_team, m.away_team].forEach((team) => {
+        if (team && !t[team]) t[team] = { p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+      });
+      if (!m.is_finished) return;
+      const hg = Number(m.home_score), ag = Number(m.away_score);
+      if (!t[m.home_team] || !t[m.away_team]) return;
+      t[m.home_team].p++; t[m.away_team].p++;
+      t[m.home_team].gf += hg; t[m.home_team].ga += ag;
+      t[m.away_team].gf += ag; t[m.away_team].ga += hg;
+      if (hg > ag)      { t[m.home_team].w++; t[m.away_team].l++; t[m.home_team].pts += 3; }
+      else if (ag > hg) { t[m.away_team].w++; t[m.home_team].l++; t[m.away_team].pts += 3; }
+      else              { t[m.home_team].d++; t[m.away_team].d++; t[m.home_team].pts++; t[m.away_team].pts++; }
+    });
+    return Object.entries(t)
+      .sort(([,a],[,b]) => b.pts - a.pts || (b.gf-b.ga)-(a.gf-a.ga) || b.gf-a.gf)
+      .map(([team, s]) => ({ team, ...s, gd: s.gf - s.ga }));
+  }, [groupMatches]);
+
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <thead>
+        <tr style={{ color: S.muted }}>
+          <th style={{ textAlign: "left", paddingBottom: 5, fontWeight: 600 }}>Team</th>
+          <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 600, width: 22 }}>P</th>
+          <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 600, width: 22 }}>W</th>
+          <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 600, width: 22 }}>D</th>
+          <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 600, width: 22 }}>L</th>
+          {!isMobile && <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 600, width: 28 }}>GD</th>}
+          <th style={{ textAlign: "center", paddingBottom: 5, fontWeight: 700, width: 30, color: S.accent }}>Pts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {table.map((row, i) => (
+          <tr key={row.team} style={{
+            borderTop: `1px solid ${S.border}`,
+            background: i < 2 ? "#1a2d1a" : i === 2 ? "#1a1a2d" : "transparent",
+          }}>
+            <td style={{ padding: "4px 0", color: i < 2 ? S.success : i === 2 ? S.accent : S.textSoft, fontWeight: i < 2 ? 700 : 400, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 90 }}>{row.team}</td>
+            <td style={{ textAlign: "center", padding: "4px 0", color: S.textSoft }}>{row.p}</td>
+            <td style={{ textAlign: "center", padding: "4px 0", color: S.textSoft }}>{row.w}</td>
+            <td style={{ textAlign: "center", padding: "4px 0", color: S.textSoft }}>{row.d}</td>
+            <td style={{ textAlign: "center", padding: "4px 0", color: S.textSoft }}>{row.l}</td>
+            {!isMobile && <td style={{ textAlign: "center", padding: "4px 0", color: S.textSoft }}>{row.gd}</td>}
+            <td style={{ textAlign: "center", padding: "4px 0", color: i < 2 ? S.success : S.text, fontWeight: 700 }}>{row.pts}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function LiveGroupPanel({ groupKey, groupMatches, isMobile }) {
+  const played = groupMatches.filter((m) => m.is_finished).length;
+  return (
+    <div style={{
+      background: S.card, border: `1px solid ${S.border}`,
+      borderRadius: 14, marginBottom: 12, overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "8px 14px", background: "#161f2e", borderBottom: `1px solid ${S.border}`,
+      }}>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: 13 }}>{groupKey}</span>
+        <span style={{ color: S.muted, fontSize: 11 }}>{played}/{groupMatches.length} played</span>
+      </div>
+      {isMobile ? (
+        <div>
+          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${S.border}` }}>
+            {groupMatches.map((m) => (
+              <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <span style={{ color: S.text, fontWeight: 600, fontSize: 12, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.home_team}</span>
+                <span style={{
+                  color: m.is_finished ? S.success : S.muted, fontWeight: 800, fontSize: 14,
+                  background: "#0a1020", padding: "3px 10px", borderRadius: 6, whiteSpace: "nowrap",
+                }}>
+                  {m.is_finished ? `${m.home_score}–${m.away_score}` : "vs"}
+                </span>
+                <span style={{ color: S.text, fontWeight: 600, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.away_team}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "10px 14px" }}>
+            <LiveGroupStandings groupMatches={groupMatches} isMobile={isMobile} />
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+          <div style={{ padding: "12px 16px", borderRight: `1px solid ${S.border}` }}>
+            {groupMatches.map((m) => (
+              <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ color: S.text, fontWeight: 600, fontSize: 13, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.home_team}</span>
+                <span style={{
+                  color: m.is_finished ? S.success : S.muted, fontWeight: 800, fontSize: 15,
+                  background: "#0a1020", padding: "4px 12px", borderRadius: 6, whiteSpace: "nowrap",
+                }}>
+                  {m.is_finished ? `${m.home_score}–${m.away_score}` : "vs"}
+                </span>
+                <span style={{ color: S.text, fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.away_team}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "12px 16px" }}>
+            <LiveGroupStandings groupMatches={groupMatches} isMobile={isMobile} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LiveTournamentTab({ userId, isMobile }) {
+  const [groupMatches, setGroupMatches] = useState([]);
   const [liveMatches, setLiveMatches] = useState([]);
   const [livePreds, setLivePreds] = useState({});
   const [savedLive, setSavedLive] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [activeGroup, setActiveGroup] = useState(null);
 
   useEffect(() => {
     const load = async () => {
-      const { data: matches } = await supabase
-        .from("matches")
-        .select("id, stage, home_team, away_team, home_score, away_score, is_finished")
-        .in("stage", KNOCKOUT_STAGES)
-        .not("home_team", "is", null)
-        .not("away_team", "is", null)
-        .neq("home_team", "TBD")
-        .neq("away_team", "TBD");
-
-      const { data: preds } = await supabase
-        .from("live_predictions")
-        .select("match_id, predicted_home_score, predicted_away_score")
-        .eq("user_id", userId);
+      const [{ data: gMatches }, { data: kMatches }, { data: preds }] = await Promise.all([
+        supabase.from("matches").select("id, stage, home_team, away_team, home_score, away_score, is_finished").like("stage", "Group %"),
+        supabase.from("matches").select("id, stage, home_team, away_team, home_score, away_score, is_finished").in("stage", KNOCKOUT_STAGES).not("home_team", "is", null).not("away_team", "is", null).neq("home_team", "TBD").neq("away_team", "TBD"),
+        supabase.from("live_predictions").select("match_id, predicted_home_score, predicted_away_score").eq("user_id", userId),
+      ]);
 
       const predMap = {};
       const savedSet = new Set();
@@ -643,7 +756,8 @@ function LiveTournamentTab({ userId, isMobile }) {
         savedSet.add(p.match_id);
       });
 
-      setLiveMatches(matches || []);
+      setGroupMatches(gMatches || []);
+      setLiveMatches(kMatches || []);
       setLivePreds(predMap);
       setSavedLive(savedSet);
       setLoading(false);
@@ -662,20 +776,20 @@ function LiveTournamentTab({ userId, isMobile }) {
   };
 
   if (loading) return (
-    <div style={{ color: S.muted, textAlign: "center", padding: "40px 0" }}>Loading live fixtures...</div>
+    <div style={{ color: S.muted, textAlign: "center", padding: "40px 0" }}>Loading live tournament...</div>
   );
 
-  if (liveMatches.length === 0) return (
-    <div style={{
-      background: S.card, border: `1px solid ${S.border}`, borderRadius: 14,
-      padding: "40px 24px", textAlign: "center",
-    }}>
-      <div style={{ fontSize: 36, marginBottom: 12 }}>⏳</div>
-      <div style={{ color: S.text, fontWeight: 700, fontSize: 16, marginBottom: 6 }}>No live fixtures yet</div>
-      <div style={{ color: S.muted, fontSize: 13 }}>Knockout fixtures will appear here once the group stage is complete and admin enters the teams.</div>
-    </div>
-  );
+  // Group stage section
+  const groupsByKey = {};
+  groupMatches.forEach((m) => {
+    const g = m.stage;
+    if (!groupsByKey[g]) groupsByKey[g] = [];
+    groupsByKey[g].push(m);
+  });
+  const groupKeys = Object.keys(groupsByKey).sort();
+  const playedCount = groupMatches.filter((m) => m.is_finished).length;
 
+  // Knockout section
   const byStage = {};
   KNOCKOUT_STAGES.forEach((s) => { byStage[s] = []; });
   liveMatches.forEach((m) => { if (byStage[m.stage]) byStage[m.stage].push(m); });
@@ -688,32 +802,80 @@ function LiveTournamentTab({ userId, isMobile }) {
     [DB_STAGE.Final]: "Final",
   };
 
+  // Tabs: Groups + each knockout stage that has fixtures
+  const availableKnockout = KNOCKOUT_STAGES.filter((s) => byStage[s].length > 0);
+  const tabs = ["groups", ...availableKnockout];
+  const currentTab = activeGroup ?? tabs[0];
+
   return (
     <div>
-      <div style={{ background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12, padding: "12px 16px", marginBottom: 20 }}>
-        <div style={{ color: S.text, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Live Round-by-Round Predictions</div>
-        <div style={{ color: S.muted, fontSize: 12 }}>Predict each knockout round as fixtures are confirmed. Points count alongside your initial bracket predictions.</div>
+      {/* Tab bar */}
+      <div style={{
+        display: "flex", gap: 3, marginBottom: 20,
+        background: S.surface, borderRadius: 10, padding: 3,
+        border: `1px solid ${S.border}`, overflowX: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveGroup(tab)}
+            style={{
+              flex: "0 0 auto",
+              padding: isMobile ? "8px 10px" : "9px 14px",
+              border: "none", borderRadius: 7, cursor: "pointer",
+              fontWeight: 600, fontSize: isMobile ? 12 : 13,
+              background: currentTab === tab ? S.accent : "transparent",
+              color: currentTab === tab ? "white" : S.muted,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tab === "groups"
+              ? `Groups${playedCount > 0 ? ` (${playedCount}/${groupMatches.length})` : ""}`
+              : isMobile
+                ? (stageLabelMap[tab] || tab).replace("Round of ", "R").replace("Quarter-finals","QF").replace("Semi-finals","SF")
+                : (stageLabelMap[tab] || tab)
+            }
+          </button>
+        ))}
       </div>
 
-      {KNOCKOUT_STAGES.map((stage) => {
-        const ms = byStage[stage];
-        if (!ms.length) return null;
-        return (
-          <div key={stage} style={{ marginBottom: 32 }}>
-            <h2 style={{ color: S.text, fontSize: isMobile ? 16 : 19, fontWeight: 800, margin: "0 0 14px" }}>{stageLabelMap[stage]}</h2>
-            {ms.map((match) => (
-              <LiveMatchCard
-                key={match.id}
-                match={match}
-                livePred={livePreds[match.id] ?? null}
-                onSave={saveLivePred}
-                saved={savedLive.has(match.id)}
-                isMobile={isMobile}
-              />
-            ))}
+      {/* Groups tab */}
+      {currentTab === "groups" && (
+        <div>
+          {groupMatches.length === 0 ? (
+            <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 14, padding: "32px 24px", textAlign: "center" }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>⏳</div>
+              <div style={{ color: S.text, fontWeight: 700, marginBottom: 6 }}>Group stage not started yet</div>
+              <div style={{ color: S.muted, fontSize: 13 }}>Results will appear here as matches are played.</div>
+            </div>
+          ) : (
+            groupKeys.map((g) => (
+              <LiveGroupPanel key={g} groupKey={g} groupMatches={groupsByKey[g]} isMobile={isMobile} />
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Knockout tabs */}
+      {currentTab !== "groups" && (
+        <div>
+          <div style={{ background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12, padding: "12px 16px", marginBottom: 16 }}>
+            <div style={{ color: S.text, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Live Predictions — {stageLabelMap[currentTab]}</div>
+            <div style={{ color: S.muted, fontSize: 12 }}>Enter your score predictions before kick-off. 3pts for exact score, 1pt for correct result.</div>
           </div>
-        );
-      })}
+          {byStage[currentTab].map((match) => (
+            <LiveMatchCard
+              key={match.id}
+              match={match}
+              livePred={livePreds[match.id] ?? null}
+              onSave={saveLivePred}
+              saved={savedLive.has(match.id)}
+              isMobile={isMobile}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -855,6 +1017,7 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: "100vh", background: S.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: S.text }}>
+      {/* Header */}
       <header style={{
         background: S.surface, borderBottom: `1px solid ${S.border}`,
         padding: isMobile ? "0 12px" : "0 32px",
@@ -938,6 +1101,7 @@ export default function Dashboard() {
 
         {topMode === "predictions" && (
           <>
+        {/* Locked banner */}
         {locked && (
           <div style={{
             background: "#052e16", border: "1px solid #16a34a", borderRadius: 12,
@@ -952,6 +1116,7 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Action bar */}
         {!locked && (
           <div style={{
             background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12,
@@ -983,6 +1148,7 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Stage tabs */}
         <div style={{
           display: "flex", gap: 3, marginBottom: isMobile ? 16 : 28,
           background: S.surface, borderRadius: 10, padding: 3,
@@ -1019,6 +1185,7 @@ export default function Dashboard() {
           })}
         </div>
 
+        {/* Stage content */}
         {visibleStages.includes(activeTab) && (
           <StageSection
             stage={activeTab}
