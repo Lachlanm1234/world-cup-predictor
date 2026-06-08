@@ -1,103 +1,76 @@
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-const API_BASE = "https://worldcup26.ir";
+// football-data.org v4 — 2026 FIFA World Cup competition code is "WC"
+const FD_BASE = "https://api.football-data.org/v4";
+const FD_KEY = process.env.FOOTBALL_DATA_API_KEY;
 
-async function apiFetch(path, token) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+async function fdFetch(path) {
+  const res = await fetch(`${FD_BASE}${path}`, {
+    headers: { "X-Auth-Token": FD_KEY },
   });
-  if (!res.ok) throw new Error(`API ${path} returned ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`football-data.org ${path} → ${res.status}: ${text}`);
+  }
   return res.json();
-}
-
-async function getToken() {
-  // Prefer a pre-set long-lived token; fall back to password auth
-  if (process.env.WORLDCUP_API_TOKEN) return process.env.WORLDCUP_API_TOKEN;
-
-  const res = await fetch(`${API_BASE}/auth/authenticate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: process.env.WORLDCUP_API_EMAIL,
-      password: process.env.WORLDCUP_API_PASSWORD,
-    }),
-  });
-  if (!res.ok) throw new Error("Failed to authenticate with worldcup API");
-  const data = await res.json();
-  return data.token || data.access_token;
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  // Simple secret to prevent random callers triggering syncs
   if (req.headers["x-sync-secret"] !== process.env.SYNC_SECRET) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  if (!FD_KEY) return res.status(500).json({ error: "FOOTBALL_DATA_API_KEY not set" });
+
   try {
-    const token = await getToken();
+    // Fetch all WC matches — returns up to 100 per page; WC has 104 total
+    const data = await fdFetch("/competitions/WC/matches?limit=200");
+    const matches = data.matches ?? [];
 
-    const [games, teams] = await Promise.all([
-      apiFetch("/get/games", token),
-      apiFetch("/get/teams", token),
-    ]);
+    const finished = matches.filter((m) => m.status === "FINISHED");
 
-    // Build team-id → name map
-    const teamName = {};
-    (Array.isArray(teams) ? teams : teams.teams ?? []).forEach((t) => {
-      teamName[t.id] = t.name;
-    });
-
-    // Load our DB matches
-    const { data: dbMatches, error } = await supabaseAdmin
+    // Load our DB matches for name-based lookup
+    const { data: dbMatches, error: dbErr } = await supabaseAdmin
       .from("matches")
       .select("id, home_team, away_team");
-    if (error) throw error;
+    if (dbErr) throw dbErr;
 
-    // Index DB matches by "HomeTeam|AwayTeam" for quick lookup
+    // Normalise team names to lower-case for fuzzy matching
+    const normalise = (s) => (s ?? "").toLowerCase().replace(/[^a-z]/g, "");
+
     const dbIndex = {};
     dbMatches.forEach((m) => {
-      dbIndex[`${m.home_team}|${m.away_team}`] = m.id;
+      dbIndex[`${normalise(m.home_team)}|${normalise(m.away_team)}`] = m.id;
     });
-
-    const gamesArr = Array.isArray(games) ? games : games.games ?? [];
-    const finished = gamesArr.filter(
-      (g) => g.finished === true || g.finished === "TRUE" || g.finished === "true"
-    );
 
     let updated = 0;
     const notMatched = [];
 
-    for (const game of finished) {
-      const homeName = teamName[game.home_team_id] ?? game.home_team_id;
-      const awayName = teamName[game.away_team_id] ?? game.away_team_id;
-      const key = `${homeName}|${awayName}`;
+    for (const match of finished) {
+      const homeName = match.homeTeam?.name ?? match.homeTeam?.shortName ?? "";
+      const awayName = match.awayTeam?.name ?? match.awayTeam?.shortName ?? "";
+      const key = `${normalise(homeName)}|${normalise(awayName)}`;
       const dbId = dbIndex[key];
 
       if (!dbId) {
-        notMatched.push(key);
+        notMatched.push(`${homeName} v ${awayName}`);
         continue;
       }
 
+      const homeScore = match.score?.fullTime?.home ?? 0;
+      const awayScore = match.score?.fullTime?.away ?? 0;
+
       const { error: upErr } = await supabaseAdmin
         .from("matches")
-        .update({
-          home_score: game.home_score ?? 0,
-          away_score: game.away_score ?? 0,
-          is_finished: true,
-        })
+        .update({ home_score: homeScore, away_score: awayScore, is_finished: true })
         .eq("id", dbId);
 
       if (!upErr) updated++;
     }
 
-    return res.json({
-      ok: true,
-      finished: finished.length,
-      updated,
-      notMatched,
-    });
+    return res.json({ ok: true, finished: finished.length, updated, notMatched });
   } catch (err) {
     console.error("sync-results error:", err);
     return res.status(500).json({ error: err.message });
