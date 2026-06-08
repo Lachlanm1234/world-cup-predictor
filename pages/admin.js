@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { supabaseAdmin } from "../lib/supabase-admin";
 
 const S = {
   bg: "#0a0f1e",
@@ -127,15 +126,24 @@ export default function Admin() {
       updatePayload.away_team = e.awayTeam || null;
     }
 
-    const client = isKnockout ? supabaseAdmin : supabase;
-    const { error } = await client.from("matches").update(updatePayload).eq("id", matchId);
+    let error = null;
+    if (isKnockout) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch("/api/admin/save-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ matchId, payload: updatePayload }),
+      });
+      const json = await r.json();
+      if (!json.ok) error = { message: json.error };
+    } else {
+      ({ error } = await supabase.from("matches").update(updatePayload).eq("id", matchId));
+    }
 
     setSaving((p) => ({ ...p, [matchId]: false }));
     if (!error) {
       setMatches((prev) => prev.map((m) =>
-        m.id === matchId
-          ? { ...m, ...updatePayload }
-          : m
+        m.id === matchId ? { ...m, ...updatePayload } : m
       ));
     }
   };
