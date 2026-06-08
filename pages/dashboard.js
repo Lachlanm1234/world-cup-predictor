@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import { computeFullBracket, calculateGroupStandings, DB_STAGE } from "../lib/tournament";
 
+const KNOCKOUT_STAGES = [DB_STAGE.R32, DB_STAGE.R16, DB_STAGE.QF, DB_STAGE.SF, DB_STAGE.Final];
+
 const S = {
   bg: "#0a0f1e",
   surface: "#111827",
@@ -82,7 +84,6 @@ function computeGroupTable(groupMatches, scores) {
 function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange, onSaveGroup, isMobile }) {
   const table = computeGroupTable(groupMatches, scores);
   const allSaved = groupMatches.every((m) => savedIds.has(m.id));
-  const anyUnsaved = groupMatches.some((m) => !savedIds.has(m.id));
 
   const standings = (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -132,7 +133,6 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
       border: `1px solid ${allSaved ? S.successDark + "66" : S.border}`,
       borderRadius: 14, marginBottom: 16, overflow: "hidden",
     }}>
-      {/* Group header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 14px", background: "#161f2e", borderBottom: `1px solid ${S.border}`,
@@ -154,7 +154,6 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
       </div>
 
       {isMobile ? (
-        /* Mobile: matches stacked, then standings below */
         <div>
           <div style={{ padding: "12px 14px", borderBottom: `1px solid ${S.border}` }}>
             {groupMatches.map((match) => (
@@ -204,7 +203,6 @@ function GroupPanel({ groupKey, groupMatches, scores, savedIds, locked, onChange
           </div>
         </div>
       ) : (
-        /* Desktop: two columns side by side */
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
           <div style={{ padding: "14px 16px", borderRight: `1px solid ${S.border}` }}>
             {groupMatches.map((match) => (
@@ -371,7 +369,6 @@ function Best3rdTable({ groupMatches, predMap, isMobile }) {
 
   if (allThirds.length === 0) return null;
 
-  // On mobile show fewer columns
   const cols = isMobile
     ? ["p", "w", "d", "l", "gd", "pts"]
     : ["p", "w", "d", "l", "gf", "ga", "gd", "pts"];
@@ -521,6 +518,206 @@ function StageSection({ stage, matches, scores, predMap, savedIds, locked, onCha
   );
 }
 
+function LiveMatchCard({ match, livePred, onSave, saved, isMobile }) {
+  const [home, setHome] = useState(livePred?.home ?? "");
+  const [away, setAway] = useState(livePred?.away ?? "");
+  const isFinished = match.is_finished;
+  const hasPred = livePred != null;
+
+  let resultBadge = null;
+  if (isFinished && hasPred) {
+    const ph = Number(livePred.home), pa = Number(livePred.away);
+    const ah = Number(match.home_score), aa = Number(match.away_score);
+    if (ph === ah && pa === aa) {
+      resultBadge = <span style={{ fontSize: 11, fontWeight: 700, color: S.success, background: S.success + "22", border: `1px solid ${S.success}44`, borderRadius: 6, padding: "2px 7px" }}>+3 Exact</span>;
+    } else if (Math.sign(ph - pa) === Math.sign(ah - aa)) {
+      resultBadge = <span style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", background: "#f59e0b22", border: "1px solid #f59e0b44", borderRadius: 6, padding: "2px 7px" }}>+1 Result</span>;
+    } else {
+      resultBadge = <span style={{ fontSize: 11, fontWeight: 700, color: S.muted, background: S.muted + "22", border: `1px solid ${S.muted}44`, borderRadius: 6, padding: "2px 7px" }}>0 pts</span>;
+    }
+  }
+
+  const scoreDisplay = isFinished
+    ? <span style={{ color: S.success, fontWeight: 800, fontSize: 18, minWidth: 40, textAlign: "center" }}>{match.home_score}–{match.away_score}</span>
+    : null;
+
+  const handleSave = async () => {
+    await onSave(match.id, home, away);
+  };
+
+  return (
+    <div style={{
+      background: S.card,
+      border: `1px solid ${isFinished ? S.success + "44" : saved ? S.accentDark + "88" : S.border}`,
+      borderRadius: 12, padding: isMobile ? "12px" : "16px 20px", marginBottom: 10,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <span style={{ color: S.muted, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{match.stage}</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {resultBadge}
+          {isFinished && <span style={{ fontSize: 11, color: S.muted, background: S.muted + "22", border: `1px solid ${S.muted}44`, borderRadius: 6, padding: "2px 7px", fontWeight: 700 }}>Final</span>}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: isMobile ? 8 : 16 }}>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: isMobile ? 13 : 15, textAlign: "right", wordBreak: "break-word" }}>{match.home_team}</span>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          {isFinished
+            ? scoreDisplay
+            : (
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <input
+                  type="number" min="0" inputMode="numeric"
+                  value={home}
+                  onChange={(e) => setHome(e.target.value)}
+                  placeholder="0"
+                  style={{
+                    width: isMobile ? 44 : 50, height: isMobile ? 40 : 44, textAlign: "center",
+                    background: "#0a1020", border: `1.5px solid ${home !== "" ? S.accent : S.border}`,
+                    borderRadius: 7, color: S.text, fontSize: 18, fontWeight: 700, outline: "none",
+                  }}
+                />
+                <span style={{ color: S.muted, fontWeight: 700 }}>–</span>
+                <input
+                  type="number" min="0" inputMode="numeric"
+                  value={away}
+                  onChange={(e) => setAway(e.target.value)}
+                  placeholder="0"
+                  style={{
+                    width: isMobile ? 44 : 50, height: isMobile ? 40 : 44, textAlign: "center",
+                    background: "#0a1020", border: `1.5px solid ${away !== "" ? S.accent : S.border}`,
+                    borderRadius: 7, color: S.text, fontSize: 18, fontWeight: 700, outline: "none",
+                  }}
+                />
+              </div>
+            )
+          }
+        </div>
+        <span style={{ color: S.text, fontWeight: 700, fontSize: isMobile ? 13 : 15, wordBreak: "break-word" }}>{match.away_team}</span>
+      </div>
+      {!isFinished && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+          <button
+            onClick={handleSave}
+            style={{
+              padding: isMobile ? "9px 0" : "7px 24px",
+              width: isMobile ? "100%" : "auto",
+              background: saved ? S.successDark : S.accentDark,
+              color: "white", border: "none", borderRadius: 6,
+              fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {saved ? "✓ Saved" : "Save Prediction"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveTournamentTab({ userId, isMobile }) {
+  const [liveMatches, setLiveMatches] = useState([]);
+  const [livePreds, setLivePreds] = useState({});
+  const [savedLive, setSavedLive] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data: matches } = await supabase
+        .from("matches")
+        .select("id, stage, home_team, away_team, home_score, away_score, is_finished")
+        .in("stage", KNOCKOUT_STAGES)
+        .not("home_team", "is", null)
+        .not("away_team", "is", null)
+        .neq("home_team", "TBD")
+        .neq("away_team", "TBD");
+
+      const { data: preds } = await supabase
+        .from("live_predictions")
+        .select("match_id, predicted_home_score, predicted_away_score")
+        .eq("user_id", userId);
+
+      const predMap = {};
+      const savedSet = new Set();
+      preds?.forEach((p) => {
+        predMap[p.match_id] = { home: p.predicted_home_score, away: p.predicted_away_score };
+        savedSet.add(p.match_id);
+      });
+
+      setLiveMatches(matches || []);
+      setLivePreds(predMap);
+      setSavedLive(savedSet);
+      setLoading(false);
+    };
+    load();
+  }, [userId]);
+
+  const saveLivePred = async (matchId, home, away) => {
+    await supabase.from("live_predictions").upsert({
+      user_id: userId, match_id: matchId,
+      predicted_home_score: parseInt(home ?? 0),
+      predicted_away_score: parseInt(away ?? 0),
+    });
+    setLivePreds((prev) => ({ ...prev, [matchId]: { home, away } }));
+    setSavedLive((prev) => new Set([...prev, matchId]));
+  };
+
+  if (loading) return (
+    <div style={{ color: S.muted, textAlign: "center", padding: "40px 0" }}>Loading live fixtures...</div>
+  );
+
+  if (liveMatches.length === 0) return (
+    <div style={{
+      background: S.card, border: `1px solid ${S.border}`, borderRadius: 14,
+      padding: "40px 24px", textAlign: "center",
+    }}>
+      <div style={{ fontSize: 36, marginBottom: 12 }}>⏳</div>
+      <div style={{ color: S.text, fontWeight: 700, fontSize: 16, marginBottom: 6 }}>No live fixtures yet</div>
+      <div style={{ color: S.muted, fontSize: 13 }}>Knockout fixtures will appear here once the group stage is complete and admin enters the teams.</div>
+    </div>
+  );
+
+  const byStage = {};
+  KNOCKOUT_STAGES.forEach((s) => { byStage[s] = []; });
+  liveMatches.forEach((m) => { if (byStage[m.stage]) byStage[m.stage].push(m); });
+
+  const stageLabelMap = {
+    [DB_STAGE.R32]: "Round of 32",
+    [DB_STAGE.R16]: "Round of 16",
+    [DB_STAGE.QF]: "Quarter-finals",
+    [DB_STAGE.SF]: "Semi-finals",
+    [DB_STAGE.Final]: "Final",
+  };
+
+  return (
+    <div>
+      <div style={{ background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12, padding: "12px 16px", marginBottom: 20 }}>
+        <div style={{ color: S.text, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Live Round-by-Round Predictions</div>
+        <div style={{ color: S.muted, fontSize: 12 }}>Predict each knockout round as fixtures are confirmed. Points count alongside your initial bracket predictions.</div>
+      </div>
+
+      {KNOCKOUT_STAGES.map((stage) => {
+        const ms = byStage[stage];
+        if (!ms.length) return null;
+        return (
+          <div key={stage} style={{ marginBottom: 32 }}>
+            <h2 style={{ color: S.text, fontSize: isMobile ? 16 : 19, fontWeight: 800, margin: "0 0 14px" }}>{stageLabelMap[stage]}</h2>
+            {ms.map((match) => (
+              <LiveMatchCard
+                key={match.id}
+                match={match}
+                livePred={livePreds[match.id] ?? null}
+                onSave={saveLivePred}
+                saved={savedLive.has(match.id)}
+                isMobile={isMobile}
+              />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -530,6 +727,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("group");
   const [advancingStage, setAdvancingStage] = useState(null);
+  const [topMode, setTopMode] = useState("predictions");
   const isMobile = useIsMobile();
 
   const loadData = useCallback(async () => {
@@ -657,7 +855,6 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: "100vh", background: S.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: S.text }}>
-      {/* Header */}
       <header style={{
         background: S.surface, borderBottom: `1px solid ${S.border}`,
         padding: isMobile ? "0 12px" : "0 32px",
@@ -712,7 +909,35 @@ export default function Dashboard() {
       </header>
 
       <main style={{ maxWidth: 860, margin: "0 auto", padding: isMobile ? "14px 10px" : "32px 24px" }}>
-        {/* Locked banner */}
+        {/* Top mode toggle */}
+        <div style={{
+          display: "flex", gap: 3, marginBottom: 20,
+          background: S.surface, borderRadius: 10, padding: 3,
+          border: `1px solid ${S.border}`,
+        }}>
+          {["predictions", "live"].map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setTopMode(mode)}
+              style={{
+                flex: 1, padding: isMobile ? "10px 8px" : "11px 16px",
+                border: "none", borderRadius: 7,
+                background: topMode === mode ? S.accent : "transparent",
+                color: topMode === mode ? "white" : S.muted,
+                fontWeight: 700, fontSize: isMobile ? 13 : 14, cursor: "pointer",
+              }}
+            >
+              {mode === "predictions" ? "🎯 My Predictions" : "⚡ Live Tournament"}
+            </button>
+          ))}
+        </div>
+
+        {topMode === "live" && user && (
+          <LiveTournamentTab userId={user.id} isMobile={isMobile} />
+        )}
+
+        {topMode === "predictions" && (
+          <>
         {locked && (
           <div style={{
             background: "#052e16", border: "1px solid #16a34a", borderRadius: 12,
@@ -727,7 +952,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Action bar */}
         {!locked && (
           <div style={{
             background: "#0c1a2e", border: `1px solid ${S.border}`, borderRadius: 12,
@@ -759,7 +983,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Stage tabs */}
         <div style={{
           display: "flex", gap: 3, marginBottom: isMobile ? 16 : 28,
           background: S.surface, borderRadius: 10, padding: 3,
@@ -796,7 +1019,6 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* Stage content */}
         {visibleStages.includes(activeTab) && (
           <StageSection
             stage={activeTab}
@@ -813,6 +1035,8 @@ export default function Dashboard() {
             advancingStage={advancingStage}
             isMobile={isMobile}
           />
+        )}
+          </>
         )}
       </main>
     </div>

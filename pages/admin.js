@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { supabaseAdmin } from "../lib/supabase-admin";
 
 const S = {
   bg: "#0a0f1e",
@@ -20,11 +21,31 @@ const STAGE_ORDER = [
   "Round of 32","Round of 16","Quarter Final","Semi - Final","Final",
 ];
 
+const KNOCKOUT_STAGES = ["Round of 32","Round of 16","Quarter Final","Semi - Final","Final"];
+
 function stageSort(a, b) {
   const ai = STAGE_ORDER.indexOf(a.stage);
   const bi = STAGE_ORDER.indexOf(b.stage);
   if (ai !== bi) return ai - bi;
   return a.id > b.id ? 1 : -1;
+}
+
+function TeamInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      type="text"
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder || "Team name"}
+      style={{
+        width: "100%", height: 40, padding: "0 10px",
+        background: "#0a1020",
+        border: `1.5px solid ${value ? S.accent : S.border}`,
+        borderRadius: 7, color: S.text, fontSize: 13, fontWeight: 600,
+        outline: "none",
+      }}
+    />
+  );
 }
 
 function ScoreInput({ value, onChange }) {
@@ -75,7 +96,10 @@ export default function Admin() {
       setMatches(data.sort(stageSort));
       const e = {};
       data.forEach((m) => {
-        e[m.id] = { home: m.home_score ?? "", away: m.away_score ?? "", finished: m.is_finished ?? false };
+        e[m.id] = {
+          home: m.home_score ?? "", away: m.away_score ?? "", finished: m.is_finished ?? false,
+          homeTeam: m.home_team ?? "", awayTeam: m.away_team ?? "",
+        };
       });
       setEdits(e);
     }
@@ -89,19 +113,27 @@ export default function Admin() {
   const saveMatch = async (matchId) => {
     setSaving((p) => ({ ...p, [matchId]: true }));
     const e = edits[matchId];
-    const { error } = await supabase
-      .from("matches")
-      .update({
-        home_score: e.home === "" ? null : Number(e.home),
-        away_score: e.away === "" ? null : Number(e.away),
-        is_finished: e.finished,
-      })
-      .eq("id", matchId);
+    const match = matches.find((m) => m.id === matchId);
+    const isKnockout = KNOCKOUT_STAGES.includes(match?.stage);
+
+    const updatePayload = {
+      home_score: e.home === "" ? null : Number(e.home),
+      away_score: e.away === "" ? null : Number(e.away),
+      is_finished: e.finished,
+    };
+    if (isKnockout) {
+      updatePayload.home_team = e.homeTeam || null;
+      updatePayload.away_team = e.awayTeam || null;
+    }
+
+    const client = isKnockout ? supabaseAdmin : supabase;
+    const { error } = await client.from("matches").update(updatePayload).eq("id", matchId);
+
     setSaving((p) => ({ ...p, [matchId]: false }));
     if (!error) {
       setMatches((prev) => prev.map((m) =>
         m.id === matchId
-          ? { ...m, home_score: e.home === "" ? null : Number(e.home), away_score: e.away === "" ? null : Number(e.away), is_finished: e.finished }
+          ? { ...m, ...updatePayload }
           : m
       ));
     }
@@ -117,10 +149,12 @@ export default function Admin() {
   const isDirty = (m) => {
     const e = edits[m.id];
     if (!e) return false;
+    const isKnockout = KNOCKOUT_STAGES.includes(m.stage);
     return (
       String(e.home) !== String(m.home_score ?? "") ||
       String(e.away) !== String(m.away_score ?? "") ||
-      e.finished !== (m.is_finished ?? false)
+      e.finished !== (m.is_finished ?? false) ||
+      (isKnockout && (e.homeTeam !== (m.home_team ?? "") || e.awayTeam !== (m.away_team ?? "")))
     );
   };
 
@@ -168,7 +202,6 @@ export default function Admin() {
       </header>
 
       <main style={{ maxWidth: 680, margin: "0 auto", padding: "16px 12px" }}>
-        {/* Filters row */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
           <select
             value={filterStage}
@@ -213,7 +246,6 @@ export default function Admin() {
           {filteredMatches.length} match{filteredMatches.length !== 1 ? "es" : ""}
         </div>
 
-        {/* Match cards */}
         {filteredMatches.length === 0 && (
           <div style={{ textAlign: "center", color: S.muted, padding: "48px 0" }}>No matches found</div>
         )}
@@ -234,7 +266,6 @@ export default function Admin() {
                 overflow: "hidden",
               }}
             >
-              {/* Card header: stage + status */}
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "8px 14px",
@@ -258,7 +289,22 @@ export default function Admin() {
                 </button>
               </div>
 
-              {/* Score row */}
+              {KNOCKOUT_STAGES.includes(match.stage) && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, padding: "10px 14px 0" }}>
+                  <TeamInput
+                    value={e.homeTeam}
+                    onChange={(v) => handleEdit(match.id, "homeTeam", v)}
+                    placeholder="Home team"
+                  />
+                  <span style={{ color: S.muted, fontSize: 12, alignSelf: "center" }}>vs</span>
+                  <TeamInput
+                    value={e.awayTeam}
+                    onChange={(v) => handleEdit(match.id, "awayTeam", v)}
+                    placeholder="Away team"
+                  />
+                </div>
+              )}
+
               <div style={{
                 display: "grid",
                 gridTemplateColumns: "1fr auto 1fr",
@@ -266,32 +312,29 @@ export default function Admin() {
                 gap: 12,
                 padding: "14px 14px",
               }}>
-                {/* Home */}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                   <span style={{
                     color: S.text, fontWeight: 700, fontSize: 14,
                     textAlign: "right", wordBreak: "break-word",
                   }}>
-                    {match.home_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
+                    {e.homeTeam || match.home_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
                   </span>
                   <ScoreInput value={e.home} onChange={(v) => handleEdit(match.id, "home", v)} />
                 </div>
 
                 <span style={{ color: S.muted, fontWeight: 800, fontSize: 18 }}>:</span>
 
-                {/* Away */}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
                   <span style={{
                     color: S.text, fontWeight: 700, fontSize: 14,
                     wordBreak: "break-word",
                   }}>
-                    {match.away_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
+                    {e.awayTeam || match.away_team || <span style={{ color: S.muted, fontStyle: "italic" }}>TBD</span>}
                   </span>
                   <ScoreInput value={e.away} onChange={(v) => handleEdit(match.id, "away", v)} />
                 </div>
               </div>
 
-              {/* Save button */}
               {dirty && (
                 <div style={{ padding: "0 14px 12px" }}>
                   <button

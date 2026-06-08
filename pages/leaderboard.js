@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { computeFullBracket, DB_STAGE } from "../lib/tournament";
+
+const BRACKET_PTS = {
+  [DB_STAGE.R32]: 1,
+  [DB_STAGE.R16]: 2,
+  [DB_STAGE.QF]: 4,
+  [DB_STAGE.SF]: 6,
+  [DB_STAGE.Final]: 10,
+  winner: 20,
+};
 
 const S = {
   bg: "#0a0f1e",
@@ -49,20 +59,20 @@ export default function Leaderboard() {
     const { data: { user } } = await supabase.auth.getUser();
     setIsAdmin(user?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL);
 
-    // Fetch finished matches with actual scores
-    const { data: matches } = await supabase
+    const { data: allMatches } = await supabase
       .from("matches")
-      .select("id, home_score, away_score, is_finished")
-      .eq("is_finished", true);
+      .select("id, stage, home_team, away_team, home_score, away_score, is_finished");
 
-    const finished = matches || [];
+    const finished = (allMatches || []).filter((m) => m.is_finished);
     setFinishedCount(finished.length);
 
-    if (finished.length === 0) {
-      // Still show all users with 0 pts so the table isn't empty
-      const { data: userData } = await supabase.from("users").select("id, email");
+    const { data: userData } = await supabase.from("users").select("id, email");
+    const emailMap = {};
+    userData?.forEach((u) => { if (u.email) emailMap[u.id] = u.email; });
+
+    if ((allMatches || []).length === 0) {
       setLeaders((userData || []).map((u) => ({
-        uid: u.id, email: u.email || "unknown", total_points: 0, exact: 0, result: 0,
+        uid: u.id, email: u.email || "unknown", total_points: 0, bracket_pts: 0, match_pts: 0, live_pts: 0, exact: 0, result: 0,
       })));
       setLoading(false);
       return;
@@ -70,50 +80,128 @@ export default function Leaderboard() {
 
     const scoreMap = {};
     finished.forEach((m) => { scoreMap[m.id] = m; });
-    const finishedIds = finished.map((m) => m.id);
 
-    // Fetch all predictions for finished matches
     const { data: preds } = await supabase
       .from("predictions")
-      .select("user_id, match_id, predicted_home_score, predicted_away_score")
-      .in("match_id", finishedIds);
+      .select("user_id, match_id, predicted_home_score, predicted_away_score");
 
-    // Fetch all users
-    const { data: userData } = await supabase.from("users").select("id, email");
-    const emailMap = {};
-    userData?.forEach((u) => { if (u.email) emailMap[u.id] = u.email; });
+    const { data: livePreds } = await supabase
+      .from("live_predictions")
+      .select("user_id, match_id, predicted_home_score, predicted_away_score");
 
-    // Aggregate points per user
-    const pointsMap = {};
+    const predsByUser = {};
+    (preds || []).forEach((p) => {
+      if (!predsByUser[p.user_id]) predsByUser[p.user_id] = {};
+      predsByUser[p.user_id][p.match_id] = {
+        match_id: p.match_id,
+        predicted_home_score: p.predicted_home_score,
+        predicted_away_score: p.predicted_away_score,
+      };
+    });
+
+    const actualTeamsByStage = {};
+    (allMatches || []).forEach((m) => {
+      if (m.stage && m.home_team && m.away_team && m.home_team !== "TBD" && m.away_team !== "TBD") {
+        if (!actualTeamsByStage[m.stage]) actualTeamsByStage[m.stage] = new Set();
+        actualTeamsByStage[m.stage].add(m.home_team);
+        actualTeamsByStage[m.stage].add(m.away_team);
+      }
+    });
+
+    const finalMatch = finished.find((m) => m.stage === DB_STAGE.Final);
+    let actualWinner = null;
+    if (finalMatch) {
+      actualWinner = finalMatch.home_score > finalMatch.away_score
+        ? finalMatch.home_team
+        : finalMatch.away_team;
+    }
+
+    const matchPtsMap = {};
     const exactMap = {};
     const resultMap = {};
 
     (preds || []).forEach((p) => {
+      const m = scoreMap[p.match_id];
+      if (!m || !m.stage?.startsWith("Group ")) return;
+      const pts = calcPoints(
+        Number(p.predicted_home_score), Number(p.predicted_away_score),
+        Number(m.home_score), Number(m.away_score)
+      );
+      if (!matchPtsMap[p.user_id]) { matchPtsMap[p.user_id] = 0; exactMap[p.user_id] = 0; resultMap[p.user_id] = 0; }
+      matchPtsMap[p.user_id] += pts;
+      if (pts === 3) exactMap[p.user_id]++;
+      else if (pts === 1) resultMap[p.user_id]++;
+    });
+
+    const livePtsMap = {};
+    const liveExactMap = {};
+    const liveResultMap = {};
+    (livePreds || []).forEach((p) => {
       const m = scoreMap[p.match_id];
       if (!m) return;
       const pts = calcPoints(
         Number(p.predicted_home_score), Number(p.predicted_away_score),
         Number(m.home_score), Number(m.away_score)
       );
-      if (!pointsMap[p.user_id]) { pointsMap[p.user_id] = 0; exactMap[p.user_id] = 0; resultMap[p.user_id] = 0; }
-      pointsMap[p.user_id] += pts;
-      if (pts === 3) exactMap[p.user_id]++;
-      else if (pts === 1) resultMap[p.user_id]++;
+      if (!livePtsMap[p.user_id]) { livePtsMap[p.user_id] = 0; liveExactMap[p.user_id] = 0; liveResultMap[p.user_id] = 0; }
+      livePtsMap[p.user_id] += pts;
+      if (pts === 3) liveExactMap[p.user_id]++;
+      else if (pts === 1) liveResultMap[p.user_id]++;
     });
 
-    // Include all users
+    const bracketPtsMap = {};
+    Object.keys(predsByUser).forEach((uid) => {
+      const bracket = computeFullBracket(allMatches, predsByUser[uid]);
+      let bpts = 0;
+      const knockoutKeys = ["R32", "R16", "QF", "SF", "Final"];
+      const stageMap = {
+        R32: DB_STAGE.R32, R16: DB_STAGE.R16, QF: DB_STAGE.QF, SF: DB_STAGE.SF, Final: DB_STAGE.Final,
+      };
+      knockoutKeys.forEach((key) => {
+        const stageMatches = bracket[key] || [];
+        const dbStage = stageMap[key];
+        const actualTeams = actualTeamsByStage[dbStage] || new Set();
+        stageMatches.forEach((m) => {
+          if (m.home_team && m.home_team !== "TBD" && actualTeams.has(m.home_team)) bpts += BRACKET_PTS[dbStage] || 0;
+          if (m.away_team && m.away_team !== "TBD" && actualTeams.has(m.away_team)) bpts += BRACKET_PTS[dbStage] || 0;
+        });
+        if (key === "Final" && actualWinner) {
+          const finalBracket = bracket.Final?.[0];
+          if (finalBracket) {
+            const userFinalPred = predsByUser[uid]?.[finalBracket.id];
+            if (userFinalPred && finalBracket.home_team && finalBracket.away_team) {
+              const predWin = Number(userFinalPred.predicted_home_score) >= Number(userFinalPred.predicted_away_score)
+                ? finalBracket.home_team : finalBracket.away_team;
+              if (predWin === actualWinner) bpts += BRACKET_PTS.winner;
+            }
+          }
+        }
+      });
+      bracketPtsMap[uid] = bpts;
+    });
+
     const allUserIds = new Set([
-      ...Object.keys(pointsMap),
+      ...Object.keys(matchPtsMap),
+      ...Object.keys(livePtsMap),
+      ...Object.keys(bracketPtsMap),
       ...(userData?.map((u) => u.id) || []),
     ]);
 
-    const rows = [...allUserIds].map((uid) => ({
-      uid,
-      email: emailMap[uid] || "unknown",
-      total_points: pointsMap[uid] ?? 0,
-      exact: exactMap[uid] ?? 0,
-      result: resultMap[uid] ?? 0,
-    }));
+    const rows = [...allUserIds].map((uid) => {
+      const mp = matchPtsMap[uid] ?? 0;
+      const lp = livePtsMap[uid] ?? 0;
+      const bp = bracketPtsMap[uid] ?? 0;
+      return {
+        uid,
+        email: emailMap[uid] || "unknown",
+        match_pts: mp,
+        live_pts: lp,
+        bracket_pts: bp,
+        total_points: mp + lp + bp,
+        exact: (exactMap[uid] ?? 0) + (liveExactMap[uid] ?? 0),
+        result: (resultMap[uid] ?? 0) + (liveResultMap[uid] ?? 0),
+      };
+    });
 
     rows.sort((a, b) => b.total_points - a.total_points || b.exact - a.exact);
     setLeaders(rows);
@@ -226,7 +314,6 @@ export default function Leaderboard() {
           </div>
         ) : (
           <div>
-            {/* Podium */}
             {leaders.length >= 3 && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 24 }}>
                 {[leaders[1], leaders[0], leaders[2]].map((player, i) => {
@@ -258,11 +345,10 @@ export default function Leaderboard() {
               </div>
             )}
 
-            {/* Full table */}
             <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, overflow: "hidden" }}>
               <div style={{
                 display: "grid",
-                gridTemplateColumns: "48px 1fr 72px 72px 80px",
+                gridTemplateColumns: "48px 1fr 64px 64px 64px 80px",
                 padding: "12px 20px",
                 background: S.surface,
                 borderBottom: `1px solid ${S.border}`,
@@ -271,15 +357,16 @@ export default function Leaderboard() {
               }}>
                 <span>Rank</span>
                 <span>Player</span>
-                <span style={{ textAlign: "center" }}>Exact</span>
-                <span style={{ textAlign: "center" }}>Result</span>
-                <span style={{ textAlign: "right" }}>Points</span>
+                <span style={{ textAlign: "center" }}>Bracket</span>
+                <span style={{ textAlign: "center" }}>Group</span>
+                <span style={{ textAlign: "center" }}>Live</span>
+                <span style={{ textAlign: "right" }}>Total</span>
               </div>
 
               {leaders.map((player, index) => (
                 <div key={player.uid} style={{
                   display: "grid",
-                  gridTemplateColumns: "48px 1fr 72px 72px 80px",
+                  gridTemplateColumns: "48px 1fr 64px 64px 64px 80px",
                   padding: "14px 20px",
                   borderBottom: index < leaders.length - 1 ? `1px solid ${S.border}` : "none",
                   alignItems: "center",
@@ -292,13 +379,17 @@ export default function Leaderboard() {
                     <div style={{ color: S.text, fontWeight: 600, fontSize: 14 }}>{player.email?.split("@")[0]}</div>
                     <div style={{ color: S.muted, fontSize: 12 }}>{player.email}</div>
                   </div>
+                  <div style={{ textAlign: "center", color: "#a78bfa", fontWeight: 600, fontSize: 13 }}>
+                    {player.bracket_pts ?? 0}
+                    <span style={{ color: S.muted, fontSize: 10, marginLeft: 2 }}>pts</span>
+                  </div>
                   <div style={{ textAlign: "center", color: S.success, fontWeight: 600, fontSize: 13 }}>
-                    {player.exact}
-                    <span style={{ color: S.muted, fontSize: 11, marginLeft: 2 }}>×3</span>
+                    {player.match_pts ?? 0}
+                    <span style={{ color: S.muted, fontSize: 10, marginLeft: 2 }}>pts</span>
                   </div>
                   <div style={{ textAlign: "center", color: S.accent, fontWeight: 600, fontSize: 13 }}>
-                    {player.result}
-                    <span style={{ color: S.muted, fontSize: 11, marginLeft: 2 }}>×1</span>
+                    {player.live_pts ?? 0}
+                    <span style={{ color: S.muted, fontSize: 10, marginLeft: 2 }}>pts</span>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <span style={{ color: index < 3 ? rankColor(index) : S.textSoft, fontWeight: 800, fontSize: 18 }}>
@@ -310,10 +401,11 @@ export default function Leaderboard() {
               ))}
             </div>
 
-            <div style={{ marginTop: 16, display: "flex", gap: 20, fontSize: 12, color: S.muted, justifyContent: "center", flexWrap: "wrap" }}>
-              <span><span style={{ color: S.success, fontWeight: 700 }}>3 pts</span> — exact score</span>
-              <span><span style={{ color: S.accent, fontWeight: 700 }}>1 pt</span> — correct result (W/D/L)</span>
-              <span><span style={{ color: S.muted, fontWeight: 700 }}>0 pts</span> — wrong</span>
+            <div style={{ marginTop: 16, display: "flex", gap: 16, fontSize: 12, color: S.muted, justifyContent: "center", flexWrap: "wrap" }}>
+              <span><span style={{ color: "#a78bfa", fontWeight: 700 }}>Bracket</span> — correct team in stage</span>
+              <span><span style={{ color: S.success, fontWeight: 700 }}>Group</span> — group match scores</span>
+              <span><span style={{ color: S.accent, fontWeight: 700 }}>Live</span> — live round predictions</span>
+              <span><span style={{ color: S.text, fontWeight: 700 }}>3pts</span> exact · <span style={{ color: S.text, fontWeight: 700 }}>1pt</span> result</span>
             </div>
           </div>
         )}
