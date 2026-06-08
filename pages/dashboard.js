@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { generateKnockout } from "../lib/tournament";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -11,12 +12,11 @@ export default function Dashboard() {
     loadUserAndData();
   }, []);
 
-  // Load user, matches, and predictions
+  // Load user + matches + predictions
   const loadUserAndData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     setUser(user);
 
-    // Get lock status
     const { data: userRow } = await supabase
       .from("users")
       .select("predictions_locked")
@@ -25,18 +25,15 @@ export default function Dashboard() {
 
     setLocked(userRow?.predictions_locked);
 
-    // Get matches
     const { data: matchData } = await supabase
       .from("matches")
       .select("*");
 
-    // Get predictions
     const { data: predictionData } = await supabase
       .from("predictions")
       .select("*")
       .eq("user_id", user.id);
 
-    // Convert predictions to lookup
     const storedScores = {};
     predictionData?.forEach((p) => {
       storedScores[p.match_id] = {
@@ -49,7 +46,7 @@ export default function Dashboard() {
     setScores(storedScores);
   };
 
-  // Handle input change
+  // Change score
   const handleChange = (matchId, field, value) => {
     if (locked) return;
 
@@ -84,51 +81,47 @@ export default function Dashboard() {
       .eq("id", user.id);
 
     setLocked(true);
-    alert("✅ Predictions locked! Good luck.");
+    alert("✅ Predictions locked!");
   };
 
-import { generateKnockout } from "../lib/tournament";
+  // 🔥 GENERATE KNOCKOUT (TEST VERSION)
+  const runKnockout = async () => {
+    const groupWinners = {
+      A: "Team A1",
+      B: "Team B1",
+      C: "Team C1",
+      D: "Team D1",
+      E: "Team E1",
+      F: "Team F1",
+      G: "Team G1",
+      H: "Team H1"
+    };
 
-const runKnockout = async () => {
-  // ⚠️ TEMP TEST DATA (replace later with real logic)
-  const groupWinners = {
-    A: "Team A1",
-    B: "Team B1",
-    C: "Team C1",
-    D: "Team D1",
-    E: "Team E1",
-    F: "Team F1",
-    G: "Team G1",
-    H: "Team H1"
+    const groupRunners = {
+      A: "Team A2",
+      B: "Team B2",
+      C: "Team C2",
+      D: "Team D2",
+      E: "Team E2",
+      F: "Team F2",
+      G: "Team G2",
+      H: "Team H2"
+    };
+
+    const bestThirds = [
+      { group: "A", team: "Team A3" },
+      { group: "C", team: "Team C3" },
+      { group: "D", team: "Team D3" },
+      { group: "F", team: "Team F3" },
+      { group: "G", team: "Team G3" },
+      { group: "H", team: "Team H3" },
+      { group: "J", team: "Team J3" },
+      { group: "K", team: "Team K3" }
+    ];
+
+    await generateKnockout(groupWinners, groupRunners, bestThirds);
   };
 
-  const groupRunners = {
-    A: "Team A2",
-    B: "Team B2",
-    C: "Team C2",
-    D: "Team D2",
-    E: "Team E2",
-    F: "Team F2",
-    G: "Team G2",
-    H: "Team H2"
-  };
-
-  const bestThirds = [
-    { group: "A", team: "Team A3" },
-    { group: "C", team: "Team C3" },
-    { group: "D", team: "Team D3" },
-    { group: "F", team: "Team F3" },
-    { group: "G", team: "Team G3" },
-    { group: "H", team: "Team H3" },
-    { group: "J", team: "Team J3" },
-    { group: "K", team: "Team K3" }
-  ];
-
-  await generateKnockout(groupWinners, groupRunners, bestThirds);
-};
-
-
-  
   // Logout
   const logout = async () => {
     await supabase.auth.signOut();
@@ -136,17 +129,17 @@ const runKnockout = async () => {
   };
 
   return (
- <div
-  style={{
-    padding: 40,
-    fontFamily: "Arial",
-    maxWidth: 900,
-    margin: "auto",
-    backgroundColor: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  }}
->
+    <div
+      style={{
+        padding: 40,
+        fontFamily: "Arial",
+        maxWidth: 900,
+        margin: "auto",
+        backgroundColor: "#0f172a",
+        minHeight: "100vh",
+        color: "white"
+      }}
+    >
       <h1 style={{ marginBottom: 10 }}>World Cup Predictor</h1>
 
       {!locked && (
@@ -168,7 +161,7 @@ const runKnockout = async () => {
 
       {locked && (
         <p style={{ marginBottom: 20, color: "green" }}>
-          ✅ Predictions locked — you’re in!
+          ✅ Predictions locked — you're in!
         </p>
       )}
 
@@ -188,14 +181,13 @@ const runKnockout = async () => {
       {matches.map((match) => (
         <div
           key={match.id}
-         style={{
-  background: "#1e293b",
-  padding: 15,
-  marginBottom: 15,
-  borderRadius: 10,
-  boxShadow: "0 2px 10px rgba(0,0,0,0.3)"
-}}
-
+          style={{
+            background: "#1e293b",
+            padding: 15,
+            marginBottom: 15,
+            borderRadius: 10,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.3)"
+          }}
         >
           <p style={{ fontSize: 18, fontWeight: "bold" }}>
             {match.home_team} vs {match.away_team}
@@ -213,7 +205,8 @@ const runKnockout = async () => {
               style={{
                 width: 60,
                 marginRight: 10,
-                padding: 5
+                padding: 8,
+                borderRadius: 5
               }}
             />
 
@@ -226,15 +219,11 @@ const runKnockout = async () => {
               }
               disabled={locked}
               style={{
-  width: 60,
-  marginRight: 10,
-  padding: 8,
-  borderRadius: 5,
-  border: "none",
-  background: locked ? "#444" : "#fff",
-  color: locked ? "#aaa" : "#000"
-}}
-
+                width: 60,
+                marginRight: 10,
+                padding: 8,
+                borderRadius: 5
+              }}
             />
 
             {!locked && (
@@ -245,21 +234,25 @@ const runKnockout = async () => {
           </div>
         </div>
       ))}
-<button onClick={runKnockout}
-  style={{ marginTop: 20, marginRight: 10 }}
->
-  Generate Knockout Stage
-</button>
-      <button onClick={logout} style={{
-  marginBottom: 20,
-  padding: "10px 16px",
-  backgroundColor: "#22c55e",
-  color: "white",
-  border: "none",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontWeight: "bold"
-}}>
+
+      {/* ✅ NEW BUTTON */}
+      <button onClick={runKnockout} style={{ marginTop: 20 }}>
+        Generate Knockout Stage
+      </button>
+
+      <button
+        onClick={logout}
+        style={{
+          marginTop: 20,
+          padding: "10px 16px",
+          backgroundColor: "#22c55e",
+          color: "white",
+          border: "none",
+          borderRadius: 6,
+          cursor: "pointer",
+          fontWeight: "bold"
+        }}
+      >
         Logout
       </button>
     </div>
