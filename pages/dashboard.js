@@ -5,62 +5,66 @@ export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [matches, setMatches] = useState([]);
   const [scores, setScores] = useState({});
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    getUser();
-    fetchMatches();
+    loadUserAndData();
   }, []);
 
-  // Get logged in user
-  const getUser = async () => {
-    const { data } = await supabase.auth.getUser();
-    setUser(data.user);
+  // Load user, matches, and predictions
+  const loadUserAndData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    setUser(user);
+
+    // Get lock status
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("predictions_locked")
+      .eq("id", user.id)
+      .single();
+
+    setLocked(userRow?.predictions_locked);
+
+    // Get matches
+    const { data: matchData } = await supabase
+      .from("matches")
+      .select("*");
+
+    // Get predictions
+    const { data: predictionData } = await supabase
+      .from("predictions")
+      .select("*")
+      .eq("user_id", user.id);
+
+    // Convert predictions to lookup
+    const storedScores = {};
+    predictionData?.forEach((p) => {
+      storedScores[p.match_id] = {
+        home: p.predicted_home_score,
+        away: p.predicted_away_score,
+      };
+    });
+
+    setMatches(matchData || []);
+    setScores(storedScores);
   };
 
-  // Fetch matches from database
- const fetchMatches = async () => {
-  const { data: matchData } = await supabase.from("matches").select("*");
+  // Handle input change
+  const handleChange = (matchId, field, value) => {
+    if (locked) return;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    setScores((prev) => ({
+      ...prev,
+      [matchId]: {
+        ...prev[matchId],
+        [field]: value,
+      },
+    }));
+  };
 
-  const { data: predictionData } = await supabase
-    .from("predictions")
-    .select("*")
-    .eq("user_id", user.id);
-
-  // Convert predictions into lookup object
-  const storedScores = {};
-
-  predictionData?.forEach((p) => {
-    storedScores[p.match_id] = {
-      home: p.predicted_home_score,
-      away: p.predicted_away_score,
-    };
-  });
-
-  setMatches(matchData || []);
-  setScores(storedScores);
-};
-
-  // Handle score input changes
-const handleChange = (matchId, field, value) => {
-  setScores((prev) => ({
-    ...prev,
-    [matchId]: {
-      ...prev[matchId],
-      [field]: value,
-    },
-  }));
-};
-``
-
-  // Save prediction to Supabase
+  // Save prediction
   const savePrediction = async (matchId) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (locked) return;
 
     const matchScore = scores[matchId];
 
@@ -70,8 +74,17 @@ const handleChange = (matchId, field, value) => {
       predicted_home_score: parseInt(matchScore?.home || 0),
       predicted_away_score: parseInt(matchScore?.away || 0),
     });
+  };
 
-    alert("Prediction saved!");
+  // Lock predictions
+  const lockPredictions = async () => {
+    await supabase
+      .from("users")
+      .update({ predictions_locked: true })
+      .eq("id", user.id);
+
+    setLocked(true);
+    alert("✅ Predictions locked! Good luck.");
   };
 
   // Logout
@@ -80,66 +93,104 @@ const handleChange = (matchId, field, value) => {
     window.location.href = "/";
   };
 
-return (
-  <div style={{ padding: 40, fontFamily: "Arial" }}>
-    <h1 style={{ marginBottom: 20 }}>World Cup Predictor</h1>
+  return (
+    <div style={{ padding: 40, fontFamily: "Arial", maxWidth: 800, margin: "auto" }}>
+      <h1 style={{ marginBottom: 10 }}>World Cup Predictor</h1>
 
-    <button 
-      onClick={() => (window.location.href = "/leaderboard")}
-      style={{ marginBottom: 20 }}
-    >
-      View Leaderboard
-    </button>
+      {!locked && (
+        <button
+          onClick={lockPredictions}
+          style={{
+            marginBottom: 20,
+            padding: "10px 16px",
+            backgroundColor: "#28a745",
+            color: "white",
+            border: "none",
+            borderRadius: 5,
+            cursor: "pointer"
+          }}
+        >
+          ✅ Submit All Predictions
+        </button>
+      )}
 
-    {user && (
-      <p style={{ marginBottom: 30 }}>
-        Logged in as: <strong>{user.email}</strong>
-      </p>
-    )}
-
-    {matches.map((match) => (
-      <div 
-        key={match.id} 
-        style={{
-          border: "1px solid #ccc",
-          padding: 15,
-          marginBottom: 15,
-          borderRadius: 8
-        }}
-      >
-        <p style={{ fontSize: 18, fontWeight: "bold" }}>
-          {match.home_team} vs {match.away_team}
+      {locked && (
+        <p style={{ marginBottom: 20, color: "green" }}>
+          ✅ Predictions locked — you’re in!
         </p>
+      )}
 
-        <div style={{ marginTop: 10 }}>
-          <input
-            type="number"
-            placeholder="Home"
-            value={scores[match.id]?.home ?? ""}
-            onChange={(e) =>
-              handleChange(match.id, "home", e.target.value)
-            }
-            style={{ width: 60, marginRight: 10 }}
-          />
+      <button
+        onClick={() => (window.location.href = "/leaderboard")}
+        style={{ marginBottom: 20 }}
+      >
+        View Leaderboard
+      </button>
 
-          <input
-            type="number"
-            placeholder="Away"
-            value={scores[match.id]?.away ?? ""}
-            onChange={(e) =>
-              handleChange(match.id, "away", e.target.value)
-            }
-            style={{ width: 60, marginRight: 10 }}
-          />
+      {user && (
+        <p style={{ marginBottom: 30 }}>
+          Logged in as: <strong>{user.email}</strong>
+        </p>
+      )}
 
-          <button onClick={() => savePrediction(match.id)}>
-            Save
-          </button>
+      {matches.map((match) => (
+        <div
+          key={match.id}
+          style={{
+            border: "1px solid #ddd",
+            padding: 15,
+            marginBottom: 15,
+            borderRadius: 8,
+            background: "#fafafa"
+          }}
+        >
+          <p style={{ fontSize: 18, fontWeight: "bold" }}>
+            {match.home_team} vs {match.away_team}
+          </p>
+
+          <div style={{ marginTop: 10 }}>
+            <input
+              type="number"
+              placeholder="Home"
+              value={scores[match.id]?.home ?? ""}
+              onChange={(e) =>
+                handleChange(match.id, "home", e.target.value)
+              }
+              disabled={locked}
+              style={{
+                width: 60,
+                marginRight: 10,
+                padding: 5
+              }}
+            />
+
+            <input
+              type="number"
+              placeholder="Away"
+              value={scores[match.id]?.away ?? ""}
+              onChange={(e) =>
+                handleChange(match.id, "away", e.target.value)
+              }
+              disabled={locked}
+              style={{
+                width: 60,
+                marginRight: 10,
+                padding: 5
+              }}
+            />
+
+            {!locked && (
+              <button onClick={() => savePrediction(match.id)}>
+                Save
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-    ))}
+      ))}
 
-    <button onClick={logout}>Logout</button>
-  </div>
-);
-``
+      <button onClick={logout} style={{ marginTop: 20 }}>
+        Logout
+      </button>
+    </div>
+  );
+}
