@@ -303,7 +303,8 @@ export default function Dashboard() {
 
     const { data: matchData, error: matchErr } = await supabase.from("matches").select("*");
     console.log("matches fetched:", matchData?.length, matchErr);
-    console.log("sample match:", matchData?.[0]);
+    console.log("all columns:", matchData?.[0] ? Object.keys(matchData[0]) : "none");
+    console.log("first 3 matches (group+stage):", matchData?.slice(0,3).map(m => ({ group: m.group, stage: m.stage, home: m.home_team })));
     const { data: predData } = await supabase
       .from("predictions")
       .select("*")
