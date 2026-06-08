@@ -729,6 +729,23 @@ export default function Dashboard() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {user?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL && (
+            <button
+              onClick={() => window.location.href = "/admin"}
+              style={{
+                padding: "8px 14px",
+                background: "transparent",
+                border: `1px solid ${S.border}`,
+                borderRadius: 8,
+                color: S.muted,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ⚙️ Admin
+            </button>
+          )}
           <button
             onClick={() => window.location.href = "/leaderboard"}
             style={{
