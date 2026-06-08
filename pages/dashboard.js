@@ -1,9 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  generateR32FromPredictions,
-  advanceRoundFromPredictions,
-} from "../lib/tournament";
+import { computeFullBracket, DB_STAGE } from "../lib/tournament";
 
 const S = {
   bg: "#0a0f1e",
@@ -17,15 +14,6 @@ const S = {
   muted: "#64748b",
   text: "#f1f5f9",
   textSoft: "#94a3b8",
-};
-
-// Maps internal key → exact string stored in the DB's `group` column
-const DB_STAGE = {
-  R32:   "Round of 32",
-  R16:   "Round of 16",
-  QF:    "Quarter Final",   // ⚠️ update if DB uses a different string
-  SF:    "Semi - Final",
-  Final: "Final",
 };
 
 const STAGE_ORDER = ["group", "R32", "R16", "QF", "SF", "Final"];
@@ -45,7 +33,6 @@ const STAGE_SEQUENCE = [
   { from: "SF",    to: "Final" },
 ];
 
-// A match belongs to group stage if its `group` column starts with "Group "
 const isGroupMatch = (m) => m.stage?.startsWith("Group ");
 const isStageMatch = (m, key) => m.stage === DB_STAGE[key];
 
@@ -325,50 +312,21 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // After any save, check if a stage just became complete and auto-advance
-  const checkAndAdvance = useCallback(async (currentSavedIds, currentMatches, currentUser) => {
-    for (const { from, to } of STAGE_SEQUENCE) {
-      if (from === "Final") break;
+  // Build predMap from scores (includes both saved and unsaved changes)
+  const predMap = useMemo(() => {
+    const map = {};
+    Object.entries(scores).forEach(([matchId, s]) => {
+      map[matchId] = {
+        match_id: matchId,
+        predicted_home_score: s.home ?? 0,
+        predicted_away_score: s.away ?? 0,
+      };
+    });
+    return map;
+  }, [scores]);
 
-      const fromMatches = currentMatches.filter((m) => {
-        if (from === "group") return isGroupMatch(m);
-        return isStageMatch(m, from);
-      });
-
-      if (fromMatches.length === 0) continue;
-
-      // Stage is "complete" if every match has a real prediction saved
-      const allSaved = fromMatches.every((m) => currentSavedIds.has(m.id));
-      if (!allSaved) break; // Stages are sequential — stop at first incomplete
-
-      // Check if the next stage already has teams populated (already generated)
-      const toMatches = currentMatches.filter((m) => isStageMatch(m, to));
-      if (toMatches.length === 0) break; // No placeholder rows — DB not set up for this stage
-
-      const alreadyPopulated = toMatches.some((m) => m.home_team && m.home_team !== "TBD");
-      if (alreadyPopulated) continue; // Already generated, move to next stage check
-
-      // Generate / advance
-      setAdvancingStage(from);
-      try {
-        if (from === "group") {
-          await generateR32FromPredictions(currentUser.id);
-        } else {
-          await advanceRoundFromPredictions(currentUser.id, from, to);
-        }
-        // Reload matches to get updated team names
-        const { data: refreshed } = await supabase.from("matches").select("*");
-        setMatches(refreshed || []);
-        setActiveTab(to);
-      } catch (e) {
-        console.error("Advance failed:", e);
-      } finally {
-        setAdvancingStage(null);
-      }
-
-      break; // Only advance one stage at a time
-    }
-  }, []);
+  // Compute the full bracket client-side — no DB writes
+  const bracket = useMemo(() => computeFullBracket(matches, predMap), [matches, predMap]);
 
   const handleChange = (matchId, field, value) => {
     if (locked) return;
@@ -388,11 +346,17 @@ export default function Dashboard() {
       predicted_home_score: parseInt(matchScore?.home ?? 0),
       predicted_away_score: parseInt(matchScore?.away ?? 0),
     });
+    setSavedIds((prev) => new Set([...prev, matchId]));
 
-    const newSavedIds = new Set([...savedIds, matchId]);
-    setSavedIds(newSavedIds);
-
-    await checkAndAdvance(newSavedIds, matches, user);
+    // Auto-advance tab when a stage becomes complete
+    for (const { from, to } of STAGE_SEQUENCE) {
+      const fromMatches = bracket[from === "group" ? "group" : from] || [];
+      if (!fromMatches.length) continue;
+      const newSaved = new Set([...savedIds, matchId]);
+      const allSaved = fromMatches.every((m) => newSaved.has(m.id));
+      if (allSaved) { setActiveTab(to); break; }
+      break;
+    }
   };
 
   const lockPredictions = async () => {
@@ -401,31 +365,11 @@ export default function Dashboard() {
     setLocked(true);
   };
 
+  // keep resetAndRegenerate only as a debug escape hatch — no-op now
   const resetAndRegenerate = async (stageKey) => {
-    const dbStage = DB_STAGE[stageKey];
-    if (!dbStage) return;
-    if (!confirm(`Reset and regenerate ${STAGE_LABELS[stageKey]}? This will overwrite the current bracket.`)) return;
-    setAdvancingStage(stageKey);
-    try {
-      // Clear all team names in this stage
-      const stageMatches = matches.filter((m) => isStageMatch(m, stageKey));
-      for (const m of stageMatches) {
-        await supabase.from("matches").update({ home_team: "TBD", away_team: "TBD" }).eq("id", m.id);
-      }
-      // Re-run generation
-      if (stageKey === "R32") {
-        await generateR32FromPredictions(user.id);
-      } else {
-        const prev = STAGE_SEQUENCE.find((s) => s.to === stageKey);
-        if (prev) await advanceRoundFromPredictions(user.id, prev.from, stageKey);
-      }
-      const { data: refreshed } = await supabase.from("matches").select("*");
-      setMatches(refreshed || []);
-    } catch (e) {
-      console.error("Regenerate failed:", e);
-    } finally {
-      setAdvancingStage(null);
-    }
+    if (!confirm(`Clear saved predictions for ${STAGE_LABELS[stageKey]}?`)) return;
+    // Bracket is now purely client-side — nothing to regenerate in DB
+    setAdvancingStage(null);
   };
 
   const logout = async () => {
@@ -433,14 +377,15 @@ export default function Dashboard() {
     window.location.href = "/";
   };
 
-  // Organise matches by stage
-  const byStage = STAGE_ORDER.reduce((acc, s) => {
-    acc[s] = matches.filter((m) => {
-      if (s === "group") return isGroupMatch(m);
-      return isStageMatch(m, s);
-    });
-    return acc;
-  }, {});
+  // Use computed bracket — each user sees their own personal knockout bracket
+  const byStage = {
+    group: bracket.group || [],
+    R32:   bracket.R32   || [],
+    R16:   bracket.R16   || [],
+    QF:    bracket.QF    || [],
+    SF:    bracket.SF    || [],
+    Final: bracket.Final || [],
+  };
 
   // Which stages have content (populated or have placeholder rows)
   const visibleStages = STAGE_ORDER.filter((s) => byStage[s].length > 0);
